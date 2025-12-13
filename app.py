@@ -846,26 +846,30 @@ class FileProcessor:
     def _extract_pdf(file) -> str:
         """PDFからテキスト抽出"""
         try:
-            import fitz  # PyMuPDF
+            import fitz  # pymupdf
             pdf_bytes = file.read()
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             text = ""
             for page in doc:
                 text += page.get_text()
+            doc.close()
             return text
-        except ImportError:
-            # PyMuPDFがない場合の代替処理
-            return "[PDF読み込みにはPyMuPDFが必要です。テキストを直接貼り付けてください。]"
+        except ImportError as e:
+            return f"[PDF読み込みエラー: pymupdfをインストールしてください。 pip install pymupdf]"
+        except Exception as e:
+            return f"[PDF読み込みエラー: {str(e)}]"
     
     @staticmethod
     def _extract_docx(file) -> str:
         """Wordからテキスト抽出"""
         try:
-            import docx
-            doc = docx.Document(file)
+            from docx import Document
+            doc = Document(file)
             return "\n".join([para.text for para in doc.paragraphs])
-        except ImportError:
-            return "[Word読み込みにはpython-docxが必要です。テキストを直接貼り付けてください。]"
+        except ImportError as e:
+            return f"[Word読み込みエラー: python-docxをインストールしてください。 pip install python-docx]"
+        except Exception as e:
+            return f"[Word読み込みエラー: {str(e)}]"
 
 # =============================================================================
 # OpenAI API連携
