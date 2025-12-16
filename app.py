@@ -731,7 +731,7 @@ def generate_word_report(result: AnalysisResult) -> bytes:
         return buffer.getvalue()
     
     except ImportError:
-        return b"python-docxライブラリが必要です"
+        return "python-docx library is required".encode("utf-8")
 
 # =============================================================================
 # UI コンポーネント
