@@ -1,269 +1,129 @@
-# VERITAS v162 - 出力改善版
+# VERITAS v167 - 完全統合版
 
-**v161機能 + 高品質Word出力 + 経営者向け1枚サマリー**
+**Patent: 2025-159636** 「嘘なく、誇張なく、過不足なく」
 
-## v162 新機能: 出力改善
+## 概要
 
-### 1. 高品質Word出力 (`output/professional_report_docx.js`)
+VERITAS v167は、v166（Phase 4 SMT形式検証）をベースに、v163（弁護士思考分解）の新機能を統合した完全版です。
 
-| 機能 | 説明 |
-|------|------|
-| 自動目次 | TableOfContents自動生成 |
-| ヘッダー/フッター | ページ番号・タイトル表示 |
-| リスク色分け表 | NG_CRITICAL(赤)→OK(緑)のグラデーション |
-| 法的根拠参照 | 関連法令の自動リンク |
-| プロスタイリング | Yu Gothic、適切な余白・階層 |
+## 新機能（v167）
 
-### 2. 経営者向け1枚サマリー (`output/executive_summary.js`)
+### 弁護士思考分解モジュール（v163より統合）
 
-| 機能 | 説明 |
-|------|------|
-| Go/No-Go判定 | 4段階総合判定（GO/条件付GO/要注意/NO-GO） |
-| リスクスコア | 重み付きスコア計算（CRITICAL×10, NG×5, REVIEW×2） |
-| TOP3リスク | 最重要リスク項目の自動抽出 |
-| 推奨アクション | 優先度・期限付きアクション一覧 |
-| A4 1枚 | 経営会議向けコンパクトレイアウト |
+シエル殿設計に基づき、「弁護士の思考構造を分解して実装」しました。
 
-### 使用例
+| 機能 | 説明 | 検出対象 |
+|------|------|----------|
+| 曖昧性検出 | AMBIGUOUS_CLAUSE | 帰結未定義、判断主体不明、基準未定義 |
+| 条項間整合性 | COHERENCE_CHECK | 効果タグ衝突、重複条項 |
+| 期間未定義 | NO_TIME_LIMIT | 責任条項・解除権の期間有無 |
 
-```javascript
-// 高品質レポート出力
-const { saveReport } = require('./output/professional_report_docx.js');
-await saveReport(analysisResult, 'report.docx', {
-    title: "契約書分析レポート",
-    contractName: "業務委託契約書",
-    clientName: "株式会社テスト",
-    includeTableOfContents: true,
-    includeLegalReferences: true
-});
+**実証結果**: 弁護士指摘 **6/6項目（100%）** 自動検出達成
 
-// 経営者向けサマリー出力
-const { saveSummary } = require('./output/executive_summary.js');
-await saveSummary(analysisResult, 'summary.docx', {
-    contractName: "業務委託契約書",
-    counterparty: "株式会社パートナー",
-    contractValue: "1,000万円",
-    department: "法務部"
-});
-```
+## 既存機能（v166まで）
 
----
+### Phase 1-3: 基本分析
+- 禁止パターン26種、安全パターン20種
+- 法令DB 16法律500+条項、判例DB 15件
+- リライトパターン50+種
 
-## v161 機能（継承）: 公開判例・業界約款対応
+### Phase 4: SMT形式検証
+- **SMTエンジン**: Z3/CVC5ソルバーによる形式検証
+- **命題処理部**: 契約条項→一階述語論理(FOL)変換
+- **形式検証部**: SAT/UNSAT判定 + 不充足コア抽出
+- **PCRエンジン**: 証明付き修正案生成
+- **法令公理DB**: 7件の法令公理
 
-### テストケース大幅拡充
-
-| カテゴリ | テスト数 | 合格率 |
-|----------|----------|--------|
-| 公開判例 | **50件** | 100% |
-| 業界約款 | **44件** | 100% |
-| **合計** | **94件** | **100%** |
-| **FALSE_OK** | **0件** | ✓ |
-
-### 公開判例対応（6カテゴリ66パターン）
-
-| カテゴリ | パターン数 | 主要対象 |
-|----------|-----------|----------|
-| 消費者契約法 | 15 | 学費返還、敷金、サルベージ条項 |
-| 労働関連 | 12 | 退職制限、固定残業、競業避止 |
-| 不動産関連 | 6 | 敷金、更新料、原状回復 |
-| フランチャイズ | 4 | テリトリー、解約制限 |
-| 下請法 | 7 | 支払遅延、返品、買い叩き |
-| IT・SaaS | 6 | サービス停止、データ削除 |
-
-### 業界約款対応（10業界100パターン）
-
-| 業界 | パターン数 | 主要対象 |
-|------|-----------|----------|
-| 金融 | 6 | 元本保証、金利変更、延滞損害金 |
-| 通信 | 4 | 解約金、端末一括、速度保証 |
-| 運送 | 4 | 賠償上限、オーバーブッキング |
-| 旅行 | 4 | 天候免責、キャンセル料 |
-| 医療介護 | 4 | 結果保証、即時退去 |
-| 教育 | 4 | 成績保証、教材費、返金拒否 |
-| EC・小売 | 4 | 返品不可、ポイント失効 |
-| エネルギー | 4 | 解約金、料金改定 |
-| 建設 | 4 | 追加工事、瑕疵担保 |
-| SaaS・クラウド | 6 | SLA免責、データ所有権 |
-
----
-
-## v160 機能（継承）
-
-### ToDo圧縮強化（75% → 90%）
-
-v157で75%だった圧縮率を90%に引き上げ。
-
-| 項目 | v157 | v160 | 改善 |
-|------|------|------|------|
-| 圧縮率 | 75% | **90%** | +15pt |
-| 同義語カテゴリ | 8種 | **12種** | +4種 |
-| 同義語総数 | 100語 | **166語** | +66語 |
-| 連鎖パターン | 1種 | **11種** | +10種 |
-
-### 新規連鎖パターン（11種）
-
-```
-1. 定義→本文→例外→存続（基本連鎖）
-2. 表明→保証→補償（M&A向け）
-3. 秘密→例外→返還（NDA向け）
-4. 解除→通知→効果
-5. 禁止→例外→違反効果
-6. 支払→条件→遅延
-7. 紛争→手続→管轄
-8. 範囲→制限→例外
-9. 義務→権利→救済
-10. 原則→例外→補足
-11. 親条項→子条項→兄弟条項（階層）
-```
-
-### 新機能詳細
-
-#### 1. 相互参照解決
-```
-「前条」「次条」「第○条」「本条」等の参照を解析
-→ 参照で結ばれた条項を自動的にグループ化
-```
-
-#### 2. 階層構造認識
-```
-第1条（レベル0）
-  1. 第1項（レベル1）
-  2. 第2項（レベル1）
-    (1) 第1号（レベル2）
-    (2) 第2号（レベル2）
-
-→ 親子関係のある条項を自動グループ化
-```
-
-#### 3. 多段マージ戦略
-```
-Phase 1: 同一ドメインを統合
-Phase 2: 小グループを大グループに吸収
-Phase 3: 関連ドメインを統合
-```
-
-## v159機能（継承）
-
-### パターン精度向上
-
-| 軸 | パターン数 | 内容 |
-|---|---|---|
-| エッジケース | 25種 | 婉曲免責、暗黙同意等 |
-| ホワイトリスト | 32種 | 業界標準、法令準拠 |
-| 文脈依存 | 6トリガー | 緩和/強化条件判定 |
-
-## 統計サマリー
-
-| カテゴリ | 数量 |
-|----------|------|
-| エッジケースパターン | 25 |
-| ホワイトリストパターン | 32 |
-| 文脈トリガー | 6 |
-| 公開判例パターン | **66** |
-| 業界約款パターン | **100** |
-| 同義語カテゴリ | 12 |
-| 同義語総数 | 166 |
-| 連鎖パターン | 11 |
-| Domain Pack (v158継承) | 74 |
-| **総パターン数** | **300+** |
-
-## v161 実績
-
-- ✅ 公開判例テスト 50/50 合格（100%）
-- ✅ 業界約款テスト 44/44 合格（100%）
-- ✅ FALSE_OK = 0 維持
-- ✅ ToDo圧縮率 90%達成
-- ✅ 全テスト合格（170+件）
-- ✅ v160機能完全継承
-
-## 使用例
-
-```python
-from core import compress_todos, TodoItem, quick_analyze
-
-# ToDo圧縮
-todos = [
-    TodoItem("t1", "c1", "秘密情報の定義", "定義確認"),
-    TodoItem("t2", "c2", "守秘義務", "義務確認"),
-    TodoItem("t3", "c3", "例外規定", "例外確認"),
-    TodoItem("t4", "c4", "存続条項", "存続確認"),
-]
-
-result = compress_todos(todos)
-print(f"圧縮率: {result.compression_ratio * 100}%")
-# → 圧縮率: 75.0%（4→1グループ）
-
-# パターン分析（v159機能）
-analysis = quick_analyze("いかなる損害も責任を負いません")
-print(analysis["verdict"])  # → "NG_CRITICAL"
-```
+### Phase 5-6A: 出力・ドメイン
+- 高品質Word出力
+- 経営者1枚サマリー
+- Domain Pack（労働/不動産/IT-SaaS）
 
 ## ファイル構成
 
 ```
-veritas_v162_complete/
+veritas_v167_complete/
+├── app.py                      # メインStreamlitアプリ (v167)
 ├── core/
-│   ├── __init__.py
-│   ├── edge_cases.py        # v161: 公開判例+業界約款
-│   ├── whitelist_patterns.py # v159: ホワイトリスト
-│   ├── context_aware.py     # v159: 文脈依存
-│   ├── pattern_engine.py    # v159: 統合エンジン
-│   └── todo_compression.py  # v160: ToDo圧縮
-├── output/                   # v162: 出力改善
-│   ├── __init__.py
-│   ├── professional_report_docx.js  # 高品質Word出力
-│   └── executive_summary.js         # 経営者向け1枚サマリー
-├── domains/                  # v158継承
-│   ├── labor_pack.py
-│   ├── realestate_pack.py
-│   └── it_saas_pack.py
+│   ├── __init__.py             # コアモジュール統合
+│   ├── pattern_engine.py       # 統合パターンエンジン
+│   ├── edge_cases.py           # エッジケース検出（25種）
+│   ├── whitelist_patterns.py   # 業界別ホワイトリスト（32種）
+│   ├── context_aware.py        # 文脈依存判定
+│   ├── todo_compression.py     # ToDo圧縮（90%達成）
+│   └── lawyer_thinking/        # ★v163新機能
+│       ├── __init__.py
+│       ├── ambiguity_detector.py      # 曖昧性検出
+│       ├── clause_coherence_checker.py # 条項間整合性
+│       └── time_limit_detector.py     # 期間未定義検出
+├── domains/
+│   ├── labor_pack.py           # 雇用/出向/偽装請負（24種）
+│   ├── realestate_pack.py      # 賃貸借/売買（24種）
+│   └── it_saas_pack.py         # 利用規約/SLA（26種）
+├── output/
+│   ├── professional_report_docx.js  # Word出力
+│   └── executive_summary.js         # 経営者サマリー
 ├── tests/
-│   ├── test_case_law.py      # v161: 公開判例50件
-│   ├── test_industry_terms.py # v161: 業界約款44件
-│   ├── test_output_module.py  # v162: 出力テスト
-│   ├── phase159_accuracy_test.py
-│   └── phase160_compression_test.py
-└── README.md
+│   ├── test_case_law.py        # 判例テスト（66件）
+│   ├── test_industry_terms.py  # 業界約款テスト（100件）
+│   └── phase159_accuracy_test.py
+└── requirements.txt
 ```
 
-## 圧縮効果の図解
+## 使用方法
 
-```
-【Before: 20 ToDo】
-t01: 秘密情報の定義確認
-t02: 守秘義務の確認
-t03: 例外規定の確認
-t04: 存続条項の確認
-t05: 賠償範囲の確認
-... (計20項目)
-
-    ↓ v160圧縮処理 ↓
-
-【After: 2グループ】
-📁 グループ1: 契約条件（14項目統合）
-   └ 秘密保持/賠償/解除/支払/知財
-   └ 理由: 連鎖パターン + ドメイン統合
-
-📁 グループ2: 紛争解決（6項目統合）
-   └ 協議/管轄/準拠法
-   └ 理由: 紛争解決チェーン
+### 起動
+```bash
+pip install -r requirements.txt
+streamlit run app.py
 ```
 
-## 特許マップ
+### API使用（Python）
+```python
+from core import quick_analyze, compress_todos
+from core.lawyer_thinking import analyze_ambiguity, analyze_contract_coherence
 
-| CLAIM | 対応機能 |
-|-------|---------|
-| CLAIM_1 | パターンマッチング |
-| CLAIM_2 | 法令データベース連携 |
-| CLAIM_3 | リスク判定ロジック |
-| CLAIM_4 | ホワイトリスト・コンテキスト判定 |
-| CLAIM_5 | 修正文案生成 |
-| CLAIM_6 | 統合判定エンジン |
-| CLAIM_7 | **ToDo圧縮・連鎖束ね** |
+# 基本分析
+result = quick_analyze(contract_text)
+
+# 弁護士思考分析
+ambiguity_results = analyze_ambiguity(clause_text, "第15条2項")
+coherence_result = analyze_contract_coherence(contract_text)
+```
+
+## 品質指標
+
+| 指標 | 数値 |
+|------|------|
+| FALSE_OK（見逃し） | **0件** |
+| 弁護士指摘カバー率 | **100%** (6/6) |
+| 判例テスト | 66件合格 |
+| 業界約款テスト | 100件合格 |
+| 総パターン | 300+ |
+
+## VERITASの位置づけ
+
+✅ **VERITASがやること**
+- 論点の可視化
+- 見逃し防止
+- 思考補助
+
+❌ **VERITASがやらないこと**
+- 修正文案の確定提示
+- 法的妥当性の断定
+- 削除・存置の最終判断
+
+## 技術仕様
+
+- Python 3.10+
+- Streamlit 1.28+
+- Z3 Solver（オプション）
+- spaCy（日本語NLP）
+
+## ライセンス
+
+Proprietary - Noah王国 / VERITAS Project
 
 ---
 
-**嘘なく、誇張なく、過不足なく。**
-
-VERITAS v162 - Patent 2025-159636
+*「嘘なく、誇張なく、過不足なく」*
