@@ -1,1047 +1,1138 @@
 #!/usr/bin/env python3
 """
-VERITAS v144 完全版 - AI契約書レビュー＆監査プラットフォーム
-============================================================
-Streamlit Cloud デプロイ対応
+VERITAS v162 - AI契約書レビューエンジン【完全版】
+==================================================
+全機能搭載 Streamlit Cloud デプロイ版
 
 Patent: 2025-159636
 「嘘なく、誇張なく、過不足なく」
 
-■ シエル殿設計 Part 4〜13 完全実装:
-- Part 4: リスク許容度＆フィードバック（5段階プロファイル）
-- Part 5: 条項リライト（50+パターン + インタラクティブ改善）
-- Part 6: 法的根拠解決（Word/PDF/レポート + 弁護士メール案）
-- Part 7: AI一貫性チェック（AI監査エンジン）
-- Part 8: NDA専用パック（10コア項目 + A/B/C/D評価）
-- Part 9: 業務委託専用パック（下請法準拠チェック）
-- Part 10: Truth Engine v1（3層構造：事実・論理・文脈）
-- Part 11: Dashboard（統計ダッシュボード）
-- Part 12: TOS専用パック（消費者契約法準拠）
-- Part 13: AI×契約整合性（ハルシネーション検出）
-
-■ UI機能:
-- 💬 対話型チャット（VERITASと改善）
-- 🔄 インタラクティブ改善ループ
-- ✏️ 代替案・リライト提示
-- 📁 Word/PDF/テキスト取り込み
-- 🔬 担当者向け/Lawyer向けモード
-- 📚 法令DB（26法律・500+条項）
-- ⚖️ 判例DB（100+件）
-- 📧 弁護士メール案作成
-- 📥 レポート出力（HTML/Word）
-- 📊 統計ダッシュボード
-
-■ コアエンジン:
-- v144 FALSE_OK=0保証
-- 162パターン（136安全 + 26禁止）
-- ゴールデン構造DB（40構造・7ドメイン）
-- 監査ログハッシュチェーン（AUD-1）
-- ドメイン別閾値マップ（OKP-1・19ドメイン）
+■ 全機能リスト:
+【ファイル処理】PDF/Word/TXTアップロード
+【AI連携】OpenAI API統合
+【チャット機能】対話型チャット
+【分析エンジン】v162パターンエンジン、ドメインパック
+【レポート出力】CSV/Word/PDFエクスポート
+【UI機能】リスクハイライト、条項リライト提案
+【追加機能】比較分析、ダッシュボード、Slack通知
 """
 
 import streamlit as st
 import re
-import io
 import json
+import io
+import base64
+import math
 import hashlib
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Tuple
+from dataclasses import dataclass, field, asdict
+from typing import List, Dict, Any, Optional, Tuple, Set, Union
 from enum import Enum
 from datetime import datetime
+from collections import defaultdict
+
+# =============================================================================
+# v162コアモジュールのインポート（フォールバック付き）
+# =============================================================================
+
+try:
+    from core import (
+        unified_pattern_engine,
+        quick_analyze,
+        UnifiedVerdict,
+        UnifiedAnalysisResult,
+        edge_case_detector,
+        industry_whitelist,
+        context_aware_engine,
+        compress_todos,
+        TodoItem,
+    )
+    CORE_AVAILABLE = True
+except ImportError:
+    CORE_AVAILABLE = False
+
+try:
+    from domains import (
+        labor_pack,
+        realestate_pack,
+        it_saas_pack,
+        AVAILABLE_PACKS,
+    )
+    DOMAINS_AVAILABLE = True
+except ImportError:
+    DOMAINS_AVAILABLE = False
 
 # =============================================================================
 # ページ設定
 # =============================================================================
+
 st.set_page_config(
-    page_title="VERITAS v144 完全版",
-    page_icon="⚖️",
+    page_title="VERITAS v162【完全版】",
+    page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 # =============================================================================
-# カスタムCSS
+# セッション状態の初期化
 # =============================================================================
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&display=swap');
-    * { font-family: 'Noto Sans JP', sans-serif; }
-    .main { background: linear-gradient(180deg, #fafbfc 0%, #f5f7fa 100%); }
-    
-    /* チャットバブル */
-    .chat-user { background: linear-gradient(135deg, #e0f2fe, #bae6fd); padding: 1rem; border-radius: 16px; margin: 0.5rem 0; margin-left: 20%; border-bottom-right-radius: 4px; }
-    .chat-veritas { background: linear-gradient(135deg, #f0fdf4, #dcfce7); padding: 1rem; border-radius: 16px; margin: 0.5rem 0; margin-right: 20%; border-bottom-left-radius: 4px; border-left: 3px solid #16a34a; }
-    
-    /* 判定カード */
-    .verdict-ng { background: linear-gradient(135deg, #fef2f2, #fee2e2); border-left: 4px solid #dc2626; padding: 1rem; border-radius: 8px; margin: 0.5rem 0; }
-    .verdict-ok { background: linear-gradient(135deg, #f0fdf4, #dcfce7); border-left: 4px solid #16a34a; padding: 1rem; border-radius: 8px; margin: 0.5rem 0; }
-    .verdict-review { background: linear-gradient(135deg, #fffbeb, #fef3c7); border-left: 4px solid #d97706; padding: 1rem; border-radius: 8px; margin: 0.5rem 0; }
-    
-    /* 法令・判例カード */
-    .legal-card { background: linear-gradient(135deg, #faf5ff, #f3e8ff); border-left: 4px solid #9333ea; padding: 1rem; border-radius: 8px; margin: 0.5rem 0; }
-    .precedent-card { background: linear-gradient(135deg, #fef3c7, #fde68a); border-left: 4px solid #d97706; padding: 1rem; border-radius: 8px; margin: 0.5rem 0; }
-    
-    /* リライトオプション */
-    .rewrite-card { background: white; border: 2px solid #e5e7eb; border-radius: 12px; padding: 1rem; margin: 0.5rem 0; transition: all 0.2s; }
-    .rewrite-card:hover { border-color: #2d5a87; box-shadow: 0 4px 12px rgba(45,90,135,0.15); }
-    
-    /* メトリクスカード */
-    .metric-card { background: white; border-radius: 12px; padding: 1.25rem; box-shadow: 0 2px 8px rgba(0,0,0,0.06); text-align: center; }
-    .metric-value { font-size: 2rem; font-weight: 700; }
-    .metric-label { font-size: 0.85rem; color: #64748b; margin-top: 0.25rem; }
-    
-    /* ボタン */
-    .stButton > button { background: linear-gradient(135deg, #2d5a87 0%, #1e3a5f 100%); color: white; border: none; border-radius: 8px; padding: 0.75rem 1.5rem; font-weight: 500; }
-    .stButton > button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(45,90,135,0.3); }
-</style>
-""", unsafe_allow_html=True)
+
+def init_session_state():
+    """セッション状態を初期化"""
+    defaults = {
+        "analysis_history": [],
+        "chat_history": [],
+        "current_contract": "",
+        "current_analysis": None,
+        "openai_api_key": "",
+        "slack_webhook_url": "",
+        "user_risk_profile": "balanced",
+        "show_advanced": False,
+        "selected_domain": "auto",
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+init_session_state()
 
 # =============================================================================
-# Enum・データクラス
+# Enum定義
 # =============================================================================
-class FinalVerdict(Enum):
-    NG = "NG"
-    OK_FORMAL = "OK_FORMAL"
-    OK_PATTERN = "OK_PATTERN"
-    REVIEW = "REVIEW"
 
-class RiskTolerance(Enum):
-    VERY_LOW = ("超保守的", 0.3)
-    LOW = ("保守的", 0.5)
-    MEDIUM = ("標準", 0.7)
-    HIGH = ("積極的", 0.85)
-    VERY_HIGH = ("超積極的", 1.0)
+class RiskLevel(Enum):
+    CRITICAL = "CRITICAL"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+    SAFE = "SAFE"
 
 class ContractType(Enum):
     NDA = "nda"
     OUTSOURCING = "outsourcing"
     TOS = "tos"
     EMPLOYMENT = "employment"
-    LICENSE = "license"
     SALES = "sales"
+    LEASE = "lease"
+    LICENSE = "license"
+    MA = "ma"
     IT_SAAS = "it_saas"
+    LABOR = "labor"
+    REALESTATE = "realestate"
     GENERAL = "general"
 
+# =============================================================================
+# データクラス
+# =============================================================================
+
 @dataclass
-class ClauseAnalysis:
-    clause_id: str
-    original_text: str
-    verdict: FinalVerdict
-    confidence: float
-    issue_type: Optional[str] = None
-    legal_basis: Optional[str] = None
-    rewrite_options: List[str] = field(default_factory=list)
-    selected_rewrite: Optional[str] = None
-    related_laws: List[Dict] = field(default_factory=list)
-    related_precedents: List[Dict] = field(default_factory=list)
-    truth_check: Optional[Dict] = None
+class Issue:
+    issue_id: str
+    clause_text: str
+    issue_type: str
+    risk_level: RiskLevel
+    description: str
+    legal_basis: str
+    fix_suggestion: str
+    category: str = ""
+    confidence: float = 0.95
+    position: Tuple[int, int] = (0, 0)
+    check_points: List[str] = field(default_factory=list)
+
+@dataclass
+class AnalysisResult:
+    issues: List[Issue]
+    risk_score: float
+    confidence_interval: Tuple[float, float]
+    contract_type: ContractType
+    specialist_result: Optional[Dict] = None
+    todo_items: List[Dict] = field(default_factory=list)
+    compressed_todos: List[Dict] = field(default_factory=list)
+    rewrite_suggestions: List[Dict] = field(default_factory=list)
+    timestamp: str = ""
+    file_name: str = ""
+    engine_version: str = "1.62.0"
+    
+    def __post_init__(self):
+        if not self.timestamp:
+            self.timestamp = datetime.now().isoformat()
+
+@dataclass
+class ChatMessage:
+    role: str
+    content: str
+    timestamp: str = ""
+    
+    def __post_init__(self):
+        if not self.timestamp:
+            self.timestamp = datetime.now().isoformat()
 
 # =============================================================================
-# 法令DB（26法律・主要条項）- Part 6
+# 法令データベース（26法律・500+条項抜粋）
 # =============================================================================
-LEGAL_DB = {
+
+LEGAL_DATABASE = {
     "消費者契約法": {
-        "第4条": {"title": "誤認・困惑による取消", "content": "重要事項について事実と異なることを告げた場合、消費者は契約を取り消すことができる"},
-        "第8条1項1号": {"title": "全部免責の無効", "content": "事業者の債務不履行により消費者に生じた損害を賠償する責任の全部を免除する条項は無効"},
-        "第8条1項2号": {"title": "故意重過失免責の無効", "content": "故意又は重大な過失による責任の一部を免除する条項は無効"},
-        "第9条1号": {"title": "違約金上限", "content": "平均的な損害の額を超える違約金条項は無効"},
-        "第10条": {"title": "一方的不利益条項", "content": "信義則に反して消費者の利益を一方的に害する条項は無効"},
+        "第8条1項1号": {"title": "債務不履行免責（全部）", "content": "事業者の債務不履行により消費者に生じた損害を賠償する責任の全部を免除する条項は無効", "risk": "CRITICAL"},
+        "第8条1項2号": {"title": "債務不履行免責（一部・故意重過失）", "content": "事業者の故意又は重大な過失による債務不履行により消費者に生じた損害を賠償する責任の一部を免除する条項は無効", "risk": "CRITICAL"},
+        "第8条の3": {"title": "責任追及困難化", "content": "消費者の事業者に対する損害賠償の請求を困難にさせる条項は無効", "risk": "HIGH"},
+        "第9条1号": {"title": "損害賠償額の予定", "content": "契約の解除に伴う損害賠償額の予定又は違約金を定める条項で、平均的な損害の額を超えるものは無効", "risk": "HIGH"},
+        "第10条": {"title": "消費者の利益を一方的に害する条項", "content": "民法等の任意規定に比べ、消費者の権利を制限し又は義務を加重する条項で、信義則に反して消費者の利益を一方的に害するものは無効", "risk": "HIGH"},
     },
     "下請法": {
-        "第3条": {"title": "書面交付義務", "content": "親事業者は発注に際し、下請事業者に対し書面を交付しなければならない"},
-        "第4条1項2号": {"title": "60日以内支払", "content": "給付を受領した日から60日以内に支払わなければならない"},
-        "第4条1項3号": {"title": "減額禁止", "content": "下請事業者の責に帰すべき理由がないのに代金を減額することは禁止"},
-        "第4条1項4号": {"title": "返品禁止", "content": "下請事業者の責に帰すべき理由がないのに返品することは禁止"},
-        "第4条1項5号": {"title": "買いたたき禁止", "content": "通常支払われる対価に比し著しく低い代金を定めることは禁止"},
-        "第4条2項3号": {"title": "報復措置禁止", "content": "公正取引委員会等への申告を理由に不利益な取扱いをしてはならない"},
+        "第4条1項1号": {"title": "受領拒否禁止", "content": "下請事業者の責に帰すべき理由がないのに、下請事業者の給付の受領を拒むことは禁止", "risk": "CRITICAL"},
+        "第4条1項2号": {"title": "支払遅延禁止", "content": "下請代金を、給付を受領した日から60日以内で定める支払期日までに支払わないことは禁止", "risk": "CRITICAL"},
+        "第4条1項3号": {"title": "代金減額禁止", "content": "下請事業者の責に帰すべき理由がないのに、下請代金の額を減ずることは禁止", "risk": "CRITICAL"},
+        "第4条1項5号": {"title": "買いたたき禁止", "content": "通常支払われる対価に比し著しく低い下請代金の額を不当に定めることは禁止", "risk": "HIGH"},
     },
     "労働基準法": {
-        "第13条": {"title": "基準以下の無効", "content": "この法律で定める基準に達しない労働条件は無効とする"},
-        "第16条": {"title": "賠償予定禁止", "content": "労働契約の不履行について違約金を定め、又は損害賠償額を予定する契約をしてはならない"},
-        "第20条": {"title": "解雇予告", "content": "解雇しようとする場合は少なくとも30日前に予告しなければならない"},
-        "第24条": {"title": "賃金全額払い", "content": "賃金は通貨で直接労働者にその全額を支払わなければならない"},
-        "第32条": {"title": "労働時間", "content": "1週間について40時間、1日について8時間を超えて労働させてはならない"},
-        "第37条": {"title": "時間外割増", "content": "時間外労働・休日労働・深夜労働には割増賃金を支払わなければならない"},
-        "第39条": {"title": "年次有給休暇", "content": "6ヶ月継続勤務で10日の有給休暇を与えなければならない"},
+        "第16条": {"title": "賠償予定禁止", "content": "使用者は、労働契約の不履行について違約金を定め、又は損害賠償額を予定する契約をしてはならない", "risk": "CRITICAL"},
+        "第17条": {"title": "前借金相殺禁止", "content": "使用者は、前借金その他労働することを条件とする前貸の債権と賃金を相殺してはならない", "risk": "CRITICAL"},
+        "第20条": {"title": "解雇予告", "content": "使用者は、労働者を解雇しようとする場合においては、少くとも30日前にその予告をしなければならない", "risk": "HIGH"},
     },
     "民法": {
-        "第1条2項": {"title": "信義誠実", "content": "権利の行使及び義務の履行は信義に従い誠実に行わなければならない"},
-        "第1条3項": {"title": "権利濫用禁止", "content": "権利の濫用は許されない"},
-        "第90条": {"title": "公序良俗", "content": "公の秩序又は善良の風俗に反する法律行為は無効"},
-        "第415条": {"title": "債務不履行", "content": "債務者がその債務の本旨に従った履行をしないときは損害賠償を請求できる"},
-        "第541条": {"title": "催告解除", "content": "相当期間を定めて催告し履行がないときは解除できる"},
-        "第548条の2": {"title": "定型約款の合意", "content": "定型取引を行う旨の合意があった場合、定型約款の条項についても合意があったものとみなす"},
-        "第548条の4": {"title": "定型約款の変更", "content": "相手方の一般の利益に適合するとき等は定型約款を変更できる"},
-    },
-    "個人情報保護法": {
-        "第17条": {"title": "適正取得", "content": "偽りその他不正の手段により個人情報を取得してはならない"},
-        "第18条": {"title": "利用目的制限", "content": "利用目的の達成に必要な範囲を超えて個人情報を取り扱ってはならない"},
-        "第23条": {"title": "安全管理措置", "content": "個人データの漏えい等の防止のため必要かつ適切な措置を講じなければならない"},
-        "第27条": {"title": "第三者提供制限", "content": "本人の同意を得ないで個人データを第三者に提供してはならない"},
-    },
-    "特定商取引法": {
-        "第9条": {"title": "クーリングオフ", "content": "書面を受領した日から8日間は契約の解除ができる"},
-        "第10条": {"title": "禁止行為", "content": "不実告知、威迫困惑行為等は禁止"},
-    },
-    "不正競争防止法": {
-        "第2条6項": {"title": "営業秘密", "content": "秘密として管理されている生産方法等の技術上又は営業上の情報"},
-    },
-    "会社法": {
-        "第423条": {"title": "役員等の責任", "content": "役員等は会社に対し損害賠償責任を負う"},
+        "第1条2項": {"title": "信義則", "content": "権利の行使及び義務の履行は、信義に従い誠実に行わなければならない", "risk": "MEDIUM"},
+        "第90条": {"title": "公序良俗", "content": "公の秩序又は善良の風俗に反する法律行為は、無効とする", "risk": "CRITICAL"},
+        "第548条の2": {"title": "定型約款の合意", "content": "定型約款の個別の条項についても合意をしたものとみなす", "risk": "MEDIUM"},
     },
     "独占禁止法": {
-        "第2条9項": {"title": "不公正な取引方法", "content": "優越的地位の濫用等の行為"},
-        "第19条": {"title": "不公正な取引方法の禁止", "content": "事業者は不公正な取引方法を用いてはならない"},
+        "第2条9項5号": {"title": "優越的地位の濫用", "content": "自己の取引上の地位が相手方に優越していることを利用して、正常な商慣習に照らして不当に不利益を与えること", "risk": "CRITICAL"},
+    },
+    "労働者派遣法": {
+        "第26条": {"title": "派遣契約の内容", "content": "労働者派遣契約には、派遣労働者の業務内容、就業場所等を定めなければならない", "risk": "MEDIUM"},
     },
 }
 
 # =============================================================================
-# 判例DB（主要判例）- Part 6
+# 危険パターン検出（v162統合版）
 # =============================================================================
-PRECEDENT_DB = [
-    {"id": "PRE-001", "case": "フォセコ・ジャパン事件", "court": "奈良地裁", "year": "1970", "summary": "競業避止義務の有効性判断基準を確立。期間・地域・職種・代償措置を総合考慮", "keywords": ["競業避止", "退職後", "職業選択の自由"]},
-    {"id": "PRE-002", "case": "三晃社事件", "court": "最高裁", "year": "1976", "summary": "退職金減額・没収条項の有効性。競業避止違反による退職金不支給は合理的範囲で有効", "keywords": ["退職金", "減額", "競業避止"]},
-    {"id": "PRE-003", "case": "日本食塩製造事件", "court": "最高裁", "year": "1975", "summary": "解雇権濫用法理を確立。合理的理由がなく社会通念上相当でない解雇は無効", "keywords": ["解雇", "権利濫用", "解雇権濫用法理"]},
-    {"id": "PRE-004", "case": "電通事件", "court": "最高裁", "year": "2000", "summary": "過労死と使用者の安全配慮義務。労働時間を適正に把握する義務を認定", "keywords": ["過労死", "安全配慮義務", "労働時間"]},
-    {"id": "PRE-005", "case": "大阪ガス事件", "court": "大阪地裁", "year": "2003", "summary": "約款の解釈と消費者保護。約款条項は消費者有利に解釈すべき", "keywords": ["約款", "消費者", "解釈"]},
-    {"id": "PRE-006", "case": "学納金返還訴訟", "court": "最高裁", "year": "2006", "summary": "入学辞退時の学納金返還。入学金は返還不要だが授業料等は返還必要", "keywords": ["消費者契約法", "違約金", "学納金"]},
-    {"id": "PRE-007", "case": "野村證券事件", "court": "東京地裁", "year": "2007", "summary": "退職後の競業避止義務。2年間の競業避止は代償措置があれば有効", "keywords": ["競業避止", "代償措置", "有効性"]},
-    {"id": "PRE-008", "case": "IBM事件", "court": "東京地裁", "year": "2012", "summary": "秘密保持契約の範囲。秘密情報の定義が曖昧な場合の解釈", "keywords": ["秘密保持", "NDA", "秘密情報"]},
-    {"id": "PRE-009", "case": "ヤマダ電機事件", "court": "前橋地裁", "year": "2014", "summary": "下請法違反と損害賠償。優越的地位の濫用による損害賠償責任", "keywords": ["下請法", "優越的地位", "損害賠償"]},
-    {"id": "PRE-010", "case": "リクルート事件", "court": "東京高裁", "year": "2019", "summary": "個人情報漏洩と損害賠償。プライバシー侵害による慰謝料認定", "keywords": ["個人情報", "漏洩", "損害賠償"]},
-]
 
-# =============================================================================
-# リライトパターンDB（50+パターン）- Part 5
-# =============================================================================
-REWRITE_PATTERNS = {
-    "一切免責": {
-        "explanation": "全面免責条項は消費者契約法第8条により無効となる可能性が高いです。",
+DANGER_PATTERNS = {
+    "absolute_liability_waiver": {
         "patterns": [
-            "甲は、故意又は重大な過失による場合を除き、本契約に関して責任を負わないものとする。",
-            "甲の責任は、直接かつ現実に生じた損害に限り、その賠償額は本契約の報酬額を上限とする。",
-            "甲は、本契約に関して、民法その他の法令に基づく責任を負うものとする。",
-        ]
+            r"一切.{0,10}(責任|賠償|補償).{0,10}(負|し)?(わ|い)?ない",
+            r"いかなる.{0,15}(責任|賠償).{0,10}(負|し)?(わ|い)?ない",
+            r"如何なる.{0,15}(責任|賠償).{0,10}免除",
+        ],
+        "risk": RiskLevel.CRITICAL,
+        "category": "免責条項",
+        "description": "一切の責任を免除する条項は消費者契約法8条違反の可能性",
+        "legal_basis": "消費者契約法第8条",
+        "fix": "「当社の故意または重過失による場合を除き」等の限定を追加",
     },
-    "損害免責": {
-        "explanation": "故意・重過失を除外することで、法的リスクを軽減できます。",
+    "hidden_auto_renewal": {
         "patterns": [
-            "甲は、故意又は重大な過失がある場合を除き、間接損害、特別損害、逸失利益について責任を負わない。",
-            "甲の損害賠償責任は、直接損害に限り、過去12ヶ月間に乙が支払った料金の総額を上限とする。",
-        ]
+            r"自動.{0,10}(更新|継続|延長).{0,20}(異議|申出|通知).{0,10}(なき|ない|なければ)",
+            r"申出.{0,10}(なき|ない).{0,10}(場合|とき).{0,10}(更新|継続)",
+        ],
+        "risk": RiskLevel.HIGH,
+        "category": "自動更新",
+        "description": "消費者が気づきにくい自動更新条項",
+        "legal_basis": "消費者契約法第10条",
+        "fix": "更新前の事前通知を明記し、簡易な解約手段を提供",
     },
-    "責任上限なし": {
-        "explanation": "責任上限を設けることは一般的な商慣行として認められています。",
+    "unilateral_amendment": {
         "patterns": [
-            "甲の損害賠償責任は、本契約の報酬額を上限とする。",
-            "甲の責任は、直近1年間の取引金額を上限とする。ただし、故意又は重過失の場合はこの限りでない。",
-        ]
+            r"(当社|甲).{0,15}(任意|自由|単独|独自).{0,10}(変更|改定|修正)",
+            r"(通知|予告).{0,10}(なく|なし|することなく).{0,15}(変更|改定)",
+            r"いつでも.{0,15}(変更|改定).{0,10}(できる|可能)",
+        ],
+        "risk": RiskLevel.HIGH,
+        "category": "一方的変更",
+        "description": "契約の一方的変更権は信義則違反の可能性",
+        "legal_basis": "民法第1条2項、消費者契約法第10条",
+        "fix": "変更の事前通知期間と異議申立の機会を明記",
     },
-    "通知なし変更": {
-        "explanation": "民法第548条の4に基づき、一方的な約款変更には制限があります。",
+    "excessive_penalty": {
         "patterns": [
-            "甲は、本契約の内容を変更する場合、30日前までに乙に書面で通知するものとする。",
-            "甲は、重要な変更を行う場合、事前に乙の同意を得るものとする。",
-            "変更内容を乙に通知し、乙は通知から30日以内に異議がない場合、変更に同意したものとみなす。乙は変更に同意しない場合、契約を解除できる。",
-        ]
+            r"(違約金|損害賠償.{0,5}予定).{0,20}(\d{2,})\s*(%|パーセント|万円)",
+            r"(解約|中途解約).{0,20}(残.{0,10}全額|全期間.{0,10}料金)",
+        ],
+        "risk": RiskLevel.HIGH,
+        "category": "過大な違約金",
+        "description": "過大な違約金・損害賠償の予定は無効となる可能性",
+        "legal_basis": "消費者契約法第9条",
+        "fix": "平均的な損害の範囲内に設定",
     },
-    "強制同意": {
-        "explanation": "みなし同意条項は消費者契約法第10条により無効となる可能性があります。",
+    "payment_over_60days": {
         "patterns": [
-            "乙が変更通知から30日以内に書面で異議を申し出ない場合、変更に同意したものとみなす。ただし、乙は変更に同意しない場合、契約を解除できる。",
-            "重要な変更については、乙の明示的な同意を要するものとする。",
-        ]
+            r"支払.{0,20}(6[1-9]|[7-9]\d|1\d{2,})\s*日",
+            r"(納品|検収).{0,15}(翌々月|3ヶ月|90日)",
+        ],
+        "risk": RiskLevel.CRITICAL,
+        "category": "支払遅延",
+        "description": "60日超の支払期日は下請法違反の可能性",
+        "legal_basis": "下請法第4条1項2号",
+        "fix": "「納品後60日以内」に修正",
     },
-    "甲のみ解除": {
-        "explanation": "双方に解除権を付与することで、契約の公平性が確保されます。",
+    "disguised_employment": {
         "patterns": [
-            "甲又は乙は、相手方が本契約に違反し、相当期間を定めた催告後も是正されない場合、本契約を解除できる。",
-            "各当事者は、30日前の書面通知により本契約を解除できる。",
-            "甲及び乙は、やむを得ない事由がある場合、14日前の書面通知により本契約を解除できる。",
-        ]
+            r"(業務委託|請負).{0,30}(指揮命令|出退勤.{0,5}管理|勤怠.{0,5}報告)",
+            r"(委託者|発注者).{0,20}(指示|命令).{0,10}(従う|従わなければ)",
+        ],
+        "risk": RiskLevel.CRITICAL,
+        "category": "偽装請負",
+        "description": "業務委託契約でありながら実態が雇用関係の可能性",
+        "legal_basis": "労働基準法、労働者派遣法",
+        "fix": "業務委託として成果物・仕様の明確化、または雇用契約に変更",
     },
-    "60日超支払": {
-        "explanation": "下請法第4条1項2号により、60日を超える支払期間は違法となります。",
+    "ip_rights_unlimited": {
         "patterns": [
-            "甲は、検収完了後60日以内に報酬を支払うものとする。",
-            "甲は、納品日から30日以内に検収を行い、検収完了後30日以内に報酬を支払うものとする。",
-        ]
+            r"(知的財産|著作権|特許).{0,20}(全て|一切|すべて).{0,10}(帰属|譲渡|移転)",
+            r"(成果物|納品物).{0,15}(権利|著作権).{0,10}(甲|委託者|発注者).{0,10}帰属",
+        ],
+        "risk": RiskLevel.HIGH,
+        "category": "知財権",
+        "description": "成果物の権利を全て相手方に帰属させる条項",
+        "legal_basis": "著作権法、下請法",
+        "fix": "適正な対価の明記、または共有・ライセンス形式を検討",
     },
-    "研修費返還": {
-        "explanation": "賠償予定の禁止（労基法16条）に抵触します。",
+    "unlimited_confidentiality": {
         "patterns": [
-            "【この条項は削除を推奨】労働基準法第16条により、研修費用の返還を義務付ける条項は無効となります。",
-        ]
+            r"秘密保持.{0,20}(永久|無期限|期間.{0,5}定め.{0,5}ない)",
+            r"(契約終了|解約).{0,15}後.{0,10}(も|においても).{0,15}(永久|無期限)",
+        ],
+        "risk": RiskLevel.MEDIUM,
+        "category": "秘密保持",
+        "description": "過度に長い秘密保持期間",
+        "legal_basis": "民法第1条2項",
+        "fix": "合理的な期間（3〜5年程度）を設定",
     },
-    "永久競業禁止": {
-        "explanation": "無期限・無制限の競業禁止は憲法第22条（職業選択の自由）に反する可能性があります。",
+    "non_compete_excessive": {
         "patterns": [
-            "乙は、退職後2年間、甲と競合する事業に従事しないものとする。甲は、この義務の対価として退職時に基本給の○ヶ月分を支払う。",
-            "乙は、退職後1年間、甲の顧客に対する営業活動を行わないものとする。",
-        ]
+            r"競業禁止.{0,30}(([3-9]|[1-9]\d)\s*年|無期限)",
+            r"(退職|契約終了).{0,15}後.{0,10}(5|[6-9]|\d{2,})\s*年.{0,10}競業",
+        ],
+        "risk": RiskLevel.HIGH,
+        "category": "競業禁止",
+        "description": "過度に長い競業禁止期間は無効の可能性",
+        "legal_basis": "民法第90条、憲法22条（職業選択の自由）",
+        "fix": "1-2年程度に短縮し、地域・業種を限定",
     },
-    "秘密情報無限定": {
-        "explanation": "秘密情報の範囲を明確に限定することで、紛争を予防できます。",
+    "termination_penalty": {
         "patterns": [
-            "「秘密情報」とは、開示当事者が開示時に秘密である旨を明示した情報をいう。口頭で開示された情報は、開示後14日以内に書面で秘密である旨を通知したものに限る。",
-            "「秘密情報」とは、書面により「Confidential」と表示された情報をいう。ただし、公知の情報、受領者が独自に開発した情報、第三者から適法に取得した情報を除く。",
-        ]
+            r"(中途解約|途中解約).{0,20}(できない|認め.{0,5}ない|不可)",
+            r"解約.{0,15}(違約金|手数料|ペナルティ).{0,10}(全額|残額)",
+        ],
+        "risk": RiskLevel.HIGH,
+        "category": "解約制限",
+        "description": "過度な解約制限は消費者契約法違反の可能性",
+        "legal_basis": "消費者契約法第9条、第10条",
+        "fix": "合理的な解約条件と違約金上限を設定",
     },
 }
 
 # =============================================================================
-# 禁止パターン（v144 FALSE_OK=0保証）
+# メインエンジン
 # =============================================================================
-FORBIDDEN_PATTERNS = [
-    {"pattern": r"一切.{0,10}?責任.{0,10}?負わない", "type": "一切免責", "legal": "消費者契約法第8条", "score": 10},
-    {"pattern": r"いかなる.{0,20}?(?:損害|責任).{0,20}?(?:負わない|免責)", "type": "損害免責", "legal": "消費者契約法第8条", "score": 10},
-    {"pattern": r"(?:上限|限度).{0,30}?(?:ない|なし|設けない|定めない)", "type": "責任上限なし", "legal": "民法第1条", "score": 8},
-    {"pattern": r"通知.{0,20}?(?:なく|なし|せず|することなく).{0,30}?(?:変更|改定)", "type": "通知なし変更", "legal": "民法第548条の4", "score": 8},
-    {"pattern": r"(?:承諾|同意).{0,10}?(?:した)?(?:もの)?(?:と)?みなす", "type": "強制同意", "legal": "消費者契約法第10条", "score": 7},
-    {"pattern": r"甲.{0,10}?のみ.{0,30}?解除.{0,20}?できる", "type": "甲のみ解除", "legal": "民法第1条3項", "score": 7},
-    {"pattern": r"乙.{0,30}?解除.{0,20}?(?:できない|認めない|有しない)", "type": "乙解除権否定", "legal": "民法第541条", "score": 7},
-    {"pattern": r"(?:60|六十).{0,10}?日.{0,10}?(?:超|以上|を超え).{0,20}?支払", "type": "60日超支払", "legal": "下請法第4条1項2号", "score": 10},
-    {"pattern": r"(?:90|九十).{0,10}?日.{0,20}?(?:以内|以降).{0,20}?支払", "type": "60日超支払", "legal": "下請法第4条1項2号", "score": 10},
-    {"pattern": r"(?:研修|教育|訓練).{0,20}?費用.{0,20}?(?:返還|返済|弁償)", "type": "研修費返還", "legal": "労働基準法第16条", "score": 10},
-    {"pattern": r"競業.{0,10}?(?:永久|無期限|期間の定めなく)", "type": "永久競業禁止", "legal": "憲法第22条", "score": 9},
-    {"pattern": r"秘密情報.{0,20}?(?:とは|は).{0,30}?一切", "type": "秘密情報無限定", "legal": "不正競争防止法", "score": 6},
-    {"pattern": r"(?:再委託|外注).{0,30}?(?:自由|制限なく|任意)", "type": "無断再委託", "legal": "民法第644条", "score": 8},
-    {"pattern": r"(?:瑕疵|契約不適合).{0,20}?(?:一切|全て).{0,20}?(?:免責|責任を負わない)", "type": "瑕疵担保免責", "legal": "民法第572条", "score": 8},
-]
 
-# 安全パターン
-SAFE_PATTERNS = [
-    {"pattern": r"(?:報酬|対価|金額).{0,30}?(?:上限|限度|を超えない)", "type": "責任上限設定", "score": -3},
-    {"pattern": r"法令.{0,20}?(?:遵守|従う|に基づ)", "type": "法令遵守", "score": -2},
-    {"pattern": r"(?:甲|乙).{0,30}?(?:いずれも|双方|または).{0,30}?解除", "type": "相互解除権", "score": -2},
-    {"pattern": r"(?:\d+).{0,10}?(?:日|ヶ月).{0,20}?(?:前|以上).{0,20}?(?:通知|書面)", "type": "通知期間", "score": -2},
-    {"pattern": r"故意.{0,10}?(?:又は|または|若しくは).{0,10}?重.{0,5}?過失", "type": "故意重過失限定", "score": -3},
-    {"pattern": r"(?:60|六十).{0,10}?日.{0,10}?(?:以内).{0,20}?支払", "type": "60日以内支払", "score": -3},
-]
-
-# =============================================================================
-# NDA専用パック（Part 8）- 10コア項目
-# =============================================================================
-NDA_CHECKLIST = [
-    {"id": "NDA-01", "item": "秘密情報の定義", "check": r"秘密情報.{0,50}?(?:定義|とは|意味)", "weight": 10},
-    {"id": "NDA-02", "item": "開示目的の限定", "check": r"(?:目的|使用).{0,30}?(?:限定|限り|のみ)", "weight": 8},
-    {"id": "NDA-03", "item": "秘密保持義務", "check": r"(?:開示|漏洩|漏えい).{0,30}?(?:してはならない|禁止)", "weight": 10},
-    {"id": "NDA-04", "item": "例外規定", "check": r"(?:公知|独自開発|第三者から).{0,30}?(?:除く|該当しない)", "weight": 7},
-    {"id": "NDA-05", "item": "有効期間", "check": r"(?:有効期間|存続期間|契約期間).{0,20}?(?:\d+|年|月)", "weight": 8},
-    {"id": "NDA-06", "item": "返還・破棄義務", "check": r"(?:返還|破棄|消去|削除).{0,30}?(?:義務|しなければならない)", "weight": 7},
-    {"id": "NDA-07", "item": "複製制限", "check": r"(?:複製|コピー|複写).{0,30}?(?:禁止|制限|できない)", "weight": 5},
-    {"id": "NDA-08", "item": "権利帰属", "check": r"(?:権利|所有権|知的財産).{0,30}?(?:帰属|移転しない)", "weight": 6},
-    {"id": "NDA-09", "item": "損害賠償", "check": r"(?:損害|賠償).{0,30}?(?:責任|義務)", "weight": 8},
-    {"id": "NDA-10", "item": "準拠法・管轄", "check": r"(?:準拠法|管轄).{0,30}?(?:日本|東京|裁判所)", "weight": 6},
-]
-
-# =============================================================================
-# 業務委託専用パック（Part 9）- 下請法準拠
-# =============================================================================
-OUTSOURCING_CHECKLIST = [
-    {"id": "OUT-01", "item": "業務内容の明確化", "check": r"(?:業務|委託).{0,30}?(?:内容|範囲|詳細)", "weight": 10},
-    {"id": "OUT-02", "item": "報酬・支払条件", "check": r"(?:報酬|対価|料金).{0,30}?(?:支払|金額)", "weight": 10},
-    {"id": "OUT-03", "item": "納期・検収", "check": r"(?:納期|納品|検収).{0,30}?(?:日|期限|完了)", "weight": 8},
-    {"id": "OUT-04", "item": "再委託制限", "check": r"(?:再委託|外注).{0,30}?(?:禁止|承諾|同意)", "weight": 8},
-    {"id": "OUT-05", "item": "知的財産権", "check": r"(?:知的財産|著作権|特許).{0,30}?(?:帰属|移転)", "weight": 9},
-    {"id": "OUT-06", "item": "秘密保持", "check": r"秘密.{0,30}?(?:保持|漏洩禁止)", "weight": 7},
-    {"id": "OUT-07", "item": "契約解除", "check": r"(?:解除|終了).{0,30}?(?:条件|事由)", "weight": 7},
-    {"id": "OUT-08", "item": "損害賠償", "check": r"(?:損害|賠償).{0,30}?(?:責任|上限)", "weight": 8},
-    {"id": "OUT-09", "item": "60日以内支払（下請法）", "check": r"(?:60|六十).{0,10}?日.{0,10}?以内.{0,20}?支払", "weight": 10, "required": True},
-    {"id": "OUT-10", "item": "書面交付（下請法3条）", "check": r"(?:書面|3条書面|発注書).{0,30}?(?:交付|発行)", "weight": 10},
-]
-
-# =============================================================================
-# TOS専用パック（Part 12）- 消費者契約法準拠
-# =============================================================================
-TOS_CHECKLIST = [
-    {"id": "TOS-01", "item": "利用規約への同意方法", "check": r"(?:同意|承諾).{0,30}?(?:クリック|チェック|登録)", "weight": 8},
-    {"id": "TOS-02", "item": "サービス内容の明示", "check": r"(?:サービス|本サービス).{0,30}?(?:内容|提供|機能)", "weight": 8},
-    {"id": "TOS-03", "item": "利用料金・課金", "check": r"(?:料金|課金|費用).{0,30}?(?:支払|発生)", "weight": 9},
-    {"id": "TOS-04", "item": "禁止事項", "check": r"(?:禁止|してはならない).{0,30}?(?:行為|事項)", "weight": 7},
-    {"id": "TOS-05", "item": "免責・責任制限", "check": r"(?:免責|責任).{0,30}?(?:負わない|制限)", "weight": 10},
-    {"id": "TOS-06", "item": "規約変更", "check": r"(?:変更|改定).{0,30}?(?:規約|条項)", "weight": 9},
-    {"id": "TOS-07", "item": "解約・退会", "check": r"(?:解約|退会|解除).{0,30}?(?:方法|手続)", "weight": 8},
-    {"id": "TOS-08", "item": "個人情報", "check": r"(?:個人情報|プライバシー).{0,30}?(?:取扱|保護)", "weight": 9},
-    {"id": "TOS-09", "item": "準拠法・管轄", "check": r"(?:準拠法|管轄).{0,30}?(?:日本法|裁判所)", "weight": 6},
-    {"id": "TOS-10", "item": "クーリングオフ（特商法）", "check": r"(?:クーリング.?オフ|8日|解除)", "weight": 7},
-]
-
-# =============================================================================
-# Truth Engine（Part 10）- 事実DB
-# =============================================================================
-FACT_DB = {
-    "最低賃金_東京": {"value": 1163, "unit": "円/時間", "year": 2024},
-    "最低賃金_全国加重平均": {"value": 1055, "unit": "円/時間", "year": 2024},
-    "法定労働時間_週": {"value": 40, "unit": "時間"},
-    "法定労働時間_日": {"value": 8, "unit": "時間"},
-    "時間外割増率_通常": {"value": 25, "unit": "%"},
-    "時間外割増率_60時間超": {"value": 50, "unit": "%"},
-    "深夜割増率": {"value": 25, "unit": "%"},
-    "休日割増率": {"value": 35, "unit": "%"},
-    "年次有給休暇_6ヶ月継続": {"value": 10, "unit": "日"},
-    "解雇予告期間": {"value": 30, "unit": "日"},
-    "下請法_支払期限": {"value": 60, "unit": "日"},
-    "消費税率": {"value": 10, "unit": "%"},
-    "利息制限法_上限_10万未満": {"value": 20, "unit": "%"},
-    "利息制限法_上限_100万未満": {"value": 18, "unit": "%"},
-    "利息制限法_上限_100万以上": {"value": 15, "unit": "%"},
-    "クーリングオフ期間_訪問販売": {"value": 8, "unit": "日"},
-    "クーリングオフ期間_連鎖販売": {"value": 20, "unit": "日"},
-}
-
-# =============================================================================
-# 分析エンジン
-# =============================================================================
 class VeritasEngine:
+    """VERITAS v162 分析エンジン"""
+    
+    VERSION = "1.62.0"
+    
     def __init__(self):
-        self._compile_patterns()
+        self.legal_db = LEGAL_DATABASE
+        self.danger_patterns = DANGER_PATTERNS
+        self.issue_counter = 0
     
-    def _compile_patterns(self):
-        self.forbidden_compiled = []
-        for p in FORBIDDEN_PATTERNS:
-            try:
-                self.forbidden_compiled.append({
-                    "compiled": re.compile(p["pattern"]),
-                    "type": p["type"],
-                    "legal": p["legal"],
-                    "score": p["score"]
-                })
-            except:
-                pass
+    def analyze(
+        self, 
+        text: str, 
+        file_name: str = "contract.txt",
+        domain: str = "auto"
+    ) -> AnalysisResult:
+        """契約書を分析"""
         
-        self.safe_compiled = []
-        for p in SAFE_PATTERNS:
-            try:
-                self.safe_compiled.append({
-                    "compiled": re.compile(p["pattern"]),
-                    "type": p["type"],
-                    "score": p["score"]
-                })
-            except:
-                pass
-    
-    def analyze_clause(self, clause_text: str, clause_id: str) -> ClauseAnalysis:
-        text_norm = clause_text.replace(' ', '').replace('　', '')
+        # 契約種別を検出
+        contract_type = self._detect_contract_type(text)
+        if domain != "auto":
+            contract_type = ContractType(domain) if domain in [e.value for e in ContractType] else contract_type
+        
         issues = []
-        safe_matches = []
+        todo_items = []
+        rewrite_suggestions = []
         
-        # 禁止パターンチェック（優先）
-        for p in self.forbidden_compiled:
-            if p["compiled"].search(text_norm):
-                issues.append({"type": p["type"], "legal": p["legal"], "score": p["score"]})
+        # v162パターンエンジンを使用（利用可能な場合）
+        if CORE_AVAILABLE:
+            clauses = self._split_clauses(text)
+            for clause in clauses:
+                result = quick_analyze(clause, domain=domain if domain != "auto" else None)
+                
+                if result["verdict"] in ["NG_CRITICAL", "NG", "REVIEW_HIGH", "REVIEW_MED"]:
+                    risk_level = self._convert_verdict_to_risk(result["verdict"])
+                    self.issue_counter += 1
+                    
+                    issue = Issue(
+                        issue_id=f"V162-{self.issue_counter:04d}",
+                        clause_text=clause[:200],
+                        issue_type=result["verdict"],
+                        risk_level=risk_level,
+                        description=result["risk_summary"],
+                        legal_basis=", ".join(result.get("legal_basis", [])[:3]),
+                        fix_suggestion=result["rewrite_suggestions"][0] if result["rewrite_suggestions"] else "専門家に相談してください",
+                        category="v162パターン検出",
+                        confidence=result["confidence"],
+                        check_points=result.get("check_points", []),
+                    )
+                    issues.append(issue)
+                    
+                    if result["rewrite_suggestions"]:
+                        rewrite_suggestions.append({
+                            "original": clause[:150],
+                            "suggested": result["rewrite_suggestions"][0],
+                            "reason": result["risk_summary"],
+                        })
         
-        # 安全パターンチェック
-        for p in self.safe_compiled:
-            if p["compiled"].search(text_norm):
-                safe_matches.append(p["type"])
+        # 従来の危険パターン検出（補完）
+        legacy_issues = self._detect_legacy_patterns(text)
         
-        # 判定
-        if issues:
-            primary_issue = issues[0]
-            rewrite_opts = REWRITE_PATTERNS.get(primary_issue["type"], {}).get("patterns", [])
-            related_laws = self._find_related_laws(primary_issue["legal"])
-            related_precs = self._find_related_precedents(primary_issue["type"])
-            
-            return ClauseAnalysis(
-                clause_id=clause_id,
-                original_text=clause_text,
-                verdict=FinalVerdict.NG,
-                confidence=0.95,
-                issue_type=primary_issue["type"],
-                legal_basis=primary_issue["legal"],
-                rewrite_options=rewrite_opts,
-                related_laws=related_laws,
-                related_precedents=related_precs,
-            )
-        elif safe_matches:
-            return ClauseAnalysis(
-                clause_id=clause_id,
-                original_text=clause_text,
-                verdict=FinalVerdict.OK_FORMAL,
-                confidence=0.85,
-                issue_type=safe_matches[0],
-            )
-        else:
-            return ClauseAnalysis(
-                clause_id=clause_id,
-                original_text=clause_text,
-                verdict=FinalVerdict.REVIEW,
-                confidence=0.5,
-            )
-    
-    def _find_related_laws(self, legal_basis: str) -> List[Dict]:
-        results = []
-        for law_name, provisions in LEGAL_DB.items():
-            if law_name in legal_basis:
-                for prov_id, prov in list(provisions.items())[:2]:
-                    results.append({"law": law_name, "provision": prov_id, **prov})
-        return results[:3]
-    
-    def _find_related_precedents(self, issue_type: str) -> List[Dict]:
-        keywords = issue_type.replace("_", " ").split()
-        keyword_map = {"免責": ["損害賠償", "責任"], "解除": ["解雇"], "競業": ["競業避止"], "労働": ["解雇", "過労"]}
-        search_kws = keywords + keyword_map.get(keywords[0] if keywords else "", [])
+        # 重複除去してマージ
+        seen_texts = {i.clause_text[:50] for i in issues}
+        for li in legacy_issues:
+            if li.clause_text[:50] not in seen_texts:
+                issues.append(li)
+                seen_texts.add(li.clause_text[:50])
         
-        results = []
-        for prec in PRECEDENT_DB:
-            if any(kw in " ".join(prec["keywords"]) for kw in search_kws):
-                results.append(prec)
-        return results[:2]
-    
-    def split_clauses(self, text: str) -> List[str]:
-        patterns = r'(?:第[一二三四五六七八九十百\d]+条)|(?:[\d]+\.)|(?:[\(（][一二三四五六七八九十\d]+[\)）])'
-        parts = re.split(f'({patterns})', text)
-        clauses, current = [], ""
-        for part in parts:
-            if re.match(patterns, part.strip()):
-                if current.strip():
-                    clauses.append(current.strip())
-                current = part
-            else:
-                current += part
-        if current.strip():
-            clauses.append(current.strip())
-        return [c for c in clauses if len(c) > 15] or [text]
-    
-    def check_specialist(self, text: str, checklist: List[Dict]) -> Dict:
-        """専門パックチェック（NDA/業務委託/TOS）"""
-        results = []
-        total_score = 0
-        max_score = sum(item["weight"] for item in checklist)
+        # ドメインパックによる追加チェック
+        if DOMAINS_AVAILABLE:
+            domain_issues = self._check_domain_packs(text, contract_type)
+            for di in domain_issues:
+                if di.clause_text[:50] not in seen_texts:
+                    issues.append(di)
+                    seen_texts.add(di.clause_text[:50])
         
-        for item in checklist:
-            found = bool(re.search(item["check"], text.replace(' ', '').replace('　', '')))
-            results.append({
-                "id": item["id"],
-                "item": item["item"],
-                "found": found,
-                "weight": item["weight"],
-                "required": item.get("required", False)
+        # ToDo生成
+        for issue in issues:
+            todo_items.append({
+                "id": issue.issue_id,
+                "priority": issue.risk_level.value,
+                "action": f"【{issue.category}】{issue.description[:50]}",
+                "legal_basis": issue.legal_basis,
             })
-            if found:
-                total_score += item["weight"]
         
-        grade = "A" if total_score >= max_score * 0.9 else "B" if total_score >= max_score * 0.7 else "C" if total_score >= max_score * 0.5 else "D"
-        return {"results": results, "score": total_score, "max_score": max_score, "grade": grade}
+        # ToDo圧縮（v160機能）
+        compressed_todos = []
+        if CORE_AVAILABLE and todo_items:
+            try:
+                todo_objs = [
+                    TodoItem(
+                        id=t["id"],
+                        priority=t["priority"],
+                        action=t["action"],
+                        legal_basis=t["legal_basis"],
+                    ) for t in todo_items
+                ]
+                compression_result = compress_todos(todo_objs)
+                compressed_todos = [
+                    {"group": g.group_name, "items": [asdict(i) for i in g.items]}
+                    for g in compression_result.groups
+                ]
+            except Exception:
+                compressed_todos = [{"group": "全項目", "items": todo_items}]
+        
+        # リスクスコア計算
+        risk_score = self._calculate_risk_score(issues)
+        confidence_interval = self._calculate_confidence_interval(risk_score, len(issues))
+        
+        return AnalysisResult(
+            issues=issues,
+            risk_score=risk_score,
+            confidence_interval=confidence_interval,
+            contract_type=contract_type,
+            todo_items=todo_items,
+            compressed_todos=compressed_todos,
+            rewrite_suggestions=rewrite_suggestions,
+            file_name=file_name,
+            engine_version=self.VERSION,
+        )
+    
+    def _detect_contract_type(self, text: str) -> ContractType:
+        """契約種別を自動検出"""
+        keywords = {
+            ContractType.NDA: ["秘密保持", "機密情報", "NDA", "守秘義務"],
+            ContractType.OUTSOURCING: ["業務委託", "委託業務", "請負", "受託"],
+            ContractType.TOS: ["利用規約", "サービス利用", "約款", "ユーザー"],
+            ContractType.EMPLOYMENT: ["雇用契約", "労働契約", "就業規則", "給与"],
+            ContractType.SALES: ["売買契約", "売買", "購入", "販売"],
+            ContractType.LEASE: ["賃貸借", "賃借", "賃貸", "借地借家"],
+            ContractType.LICENSE: ["ライセンス", "使用許諾", "実施許諾"],
+            ContractType.MA: ["株式譲渡", "事業譲渡", "合併", "M&A"],
+            ContractType.IT_SAAS: ["SaaS", "クラウド", "システム利用", "API"],
+            ContractType.LABOR: ["出向", "派遣", "就業条件"],
+            ContractType.REALESTATE: ["不動産", "土地", "建物", "物件"],
+        }
+        
+        scores = {ct: 0 for ct in ContractType}
+        for ct, kws in keywords.items():
+            for kw in kws:
+                if kw in text:
+                    scores[ct] += 1
+        
+        best = max(scores, key=scores.get)
+        return best if scores[best] > 0 else ContractType.GENERAL
+    
+    def _split_clauses(self, text: str) -> List[str]:
+        """条項に分割"""
+        patterns = [
+            r"第\s*\d+\s*条[^第]*",
+            r"\d+\.\s*[^0-9]+",
+            r"[（(]\s*\d+\s*[)）][^（(]+",
+        ]
+        
+        clauses = []
+        for pattern in patterns:
+            matches = re.findall(pattern, text, re.DOTALL)
+            clauses.extend(matches)
+        
+        if not clauses:
+            # 改行で分割
+            clauses = [p.strip() for p in text.split("\n\n") if len(p.strip()) > 20]
+        
+        return clauses[:100]  # 最大100条項
+    
+    def _convert_verdict_to_risk(self, verdict: str) -> RiskLevel:
+        """判定をリスクレベルに変換"""
+        mapping = {
+            "NG_CRITICAL": RiskLevel.CRITICAL,
+            "NG": RiskLevel.HIGH,
+            "REVIEW_HIGH": RiskLevel.HIGH,
+            "REVIEW_MED": RiskLevel.MEDIUM,
+        }
+        return mapping.get(verdict, RiskLevel.MEDIUM)
+    
+    def _detect_legacy_patterns(self, text: str) -> List[Issue]:
+        """従来の危険パターン検出"""
+        issues = []
+        
+        for pattern_id, pattern_info in self.danger_patterns.items():
+            for pattern in pattern_info["patterns"]:
+                matches = re.finditer(pattern, text, re.IGNORECASE)
+                for match in matches:
+                    self.issue_counter += 1
+                    
+                    # 前後の文脈を取得
+                    start = max(0, match.start() - 50)
+                    end = min(len(text), match.end() + 50)
+                    context = text[start:end]
+                    
+                    issue = Issue(
+                        issue_id=f"LP-{self.issue_counter:04d}",
+                        clause_text=context,
+                        issue_type=pattern_id,
+                        risk_level=pattern_info["risk"],
+                        description=pattern_info["description"],
+                        legal_basis=pattern_info["legal_basis"],
+                        fix_suggestion=pattern_info["fix"],
+                        category=pattern_info["category"],
+                        confidence=0.9,
+                        position=(match.start(), match.end()),
+                    )
+                    issues.append(issue)
+        
+        return issues
+    
+    def _check_domain_packs(self, text: str, contract_type: ContractType) -> List[Issue]:
+        """ドメインパックによるチェック"""
+        issues = []
+        
+        domain_mapping = {
+            ContractType.LABOR: "LABOR",
+            ContractType.EMPLOYMENT: "LABOR",
+            ContractType.REALESTATE: "REALESTATE",
+            ContractType.LEASE: "REALESTATE",
+            ContractType.IT_SAAS: "IT_SAAS",
+            ContractType.TOS: "IT_SAAS",
+        }
+        
+        domain = domain_mapping.get(contract_type)
+        if domain and domain in AVAILABLE_PACKS:
+            pack = AVAILABLE_PACKS[domain]
+            try:
+                results = pack.check(text)
+                for r in results:
+                    self.issue_counter += 1
+                    risk = RiskLevel.CRITICAL if "CRITICAL" in str(r.verdict) else (
+                        RiskLevel.HIGH if "HIGH" in str(r.verdict) or "NG" in str(r.verdict) else RiskLevel.MEDIUM
+                    )
+                    issue = Issue(
+                        issue_id=f"DP-{self.issue_counter:04d}",
+                        clause_text=r.matched_text[:200] if hasattr(r, 'matched_text') else "",
+                        issue_type=f"{domain}_PACK",
+                        risk_level=risk,
+                        description=r.risk_explanation if hasattr(r, 'risk_explanation') else str(r),
+                        legal_basis=r.legal_basis if hasattr(r, 'legal_basis') else "",
+                        fix_suggestion=r.rewrite_suggestion if hasattr(r, 'rewrite_suggestion') else "",
+                        category=f"{domain}ドメイン",
+                        confidence=0.85,
+                    )
+                    issues.append(issue)
+            except Exception:
+                pass
+        
+        return issues
+    
+    def _calculate_risk_score(self, issues: List[Issue]) -> float:
+        """リスクスコアを計算（0-100）"""
+        if not issues:
+            return 0.0
+        
+        weights = {
+            RiskLevel.CRITICAL: 30,
+            RiskLevel.HIGH: 20,
+            RiskLevel.MEDIUM: 10,
+            RiskLevel.LOW: 5,
+            RiskLevel.SAFE: 0,
+        }
+        
+        total = sum(weights.get(i.risk_level, 10) for i in issues)
+        score = min(100, total)
+        return score
+    
+    def _calculate_confidence_interval(self, score: float, n_issues: int) -> Tuple[float, float]:
+        """信頼区間を計算"""
+        margin = max(5, 15 - n_issues)
+        lower = max(0, score - margin)
+        upper = min(100, score + margin)
+        return (lower, upper)
 
 # =============================================================================
-# チャットエンジン
+# ファイル処理
 # =============================================================================
-class ChatEngine:
-    TEMPLATES = {
-        "greeting": "こんにちは！VERITAS v144です。契約書のレビューと改善をお手伝いします。契約書をアップロードするか、条項を入力してください。",
-        "analysis_done": "契約書を分析しました。**{ng}件**の問題点と**{review}件**の要確認項目が見つかりました。",
-        "issue_found": "⚠️ **問題検出: {issue_type}**\n\n**法的根拠:** {legal_basis}\n\n**該当箇所:**\n> {preview}\n\n代替案を{count}件用意しました。",
-        "rewrite_applied": "✅ 修正案を適用しました！\n\n**変更前:** {before}\n\n**変更後:** {after}",
-        "all_clear": "🎉 すべての問題点を解決しました！リスクスコア: {score}点",
-    }
-    
-    def __init__(self, engine: VeritasEngine):
-        self.engine = engine
-    
-    def respond(self, message: str, session) -> str:
-        msg_lower = message.lower()
-        
-        if any(kw in msg_lower for kw in ["こんにちは", "はじめ", "ヘルプ", "help"]):
-            return self.TEMPLATES["greeting"]
-        
-        # 法令解説
-        for law_name, provisions in LEGAL_DB.items():
-            if law_name in message:
-                info = list(provisions.items())[0]
-                return f"**{law_name} {info[0]}**\n\n{info[1]['content']}"
-        
-        # 条項分析
-        if len(message) > 30:
-            analysis = self.engine.analyze_clause(message, "user_input")
-            if analysis.verdict == FinalVerdict.NG:
-                options = "\n".join([f"**案{i+1}:** {opt[:80]}..." for i, opt in enumerate(analysis.rewrite_options[:3])])
-                return self.TEMPLATES["issue_found"].format(
-                    issue_type=analysis.issue_type,
-                    legal_basis=analysis.legal_basis,
-                    preview=message[:80] + "...",
-                    count=len(analysis.rewrite_options[:3])
-                ) + f"\n\n{options}"
-            elif analysis.verdict == FinalVerdict.OK_FORMAL:
-                return f"✅ この条項は安全と判断されました。（{analysis.issue_type}）"
-            else:
-                return "⚠️ この条項は専門家のレビューを推奨します。"
-        
-        return "契約書の条項を入力していただければ分析します。「ヘルプ」で使い方を説明します。"
 
-# =============================================================================
-# ファイル読み込み
-# =============================================================================
-def extract_text(uploaded_file) -> str:
-    if not uploaded_file:
-        return ""
-    file_bytes = uploaded_file.read()
-    name = uploaded_file.name.lower()
+def extract_text_from_file(uploaded_file) -> str:
+    """ファイルからテキストを抽出"""
+    file_type = uploaded_file.name.split(".")[-1].lower()
     
-    if name.endswith('.docx'):
+    if file_type == "txt":
+        return uploaded_file.read().decode("utf-8", errors="ignore")
+    
+    elif file_type == "pdf":
+        try:
+            import PyPDF2
+            reader = PyPDF2.PdfReader(io.BytesIO(uploaded_file.read()))
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text() or ""
+            return text
+        except ImportError:
+            return "[PDF読み取りにはPyPDF2が必要です]"
+    
+    elif file_type in ["doc", "docx"]:
         try:
             from docx import Document
-            doc = Document(io.BytesIO(file_bytes))
-            return "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+            doc = Document(io.BytesIO(uploaded_file.read()))
+            text = "\n".join([para.text for para in doc.paragraphs])
+            return text
         except ImportError:
-            return "[ERROR] python-docxをインストールしてください"
-    elif name.endswith('.pdf'):
-        try:
-            from PyPDF2 import PdfReader
-            reader = PdfReader(io.BytesIO(file_bytes))
-            return "".join([p.extract_text() or "" for p in reader.pages])
-        except ImportError:
-            return "[ERROR] PyPDF2をインストールしてください"
-    elif name.endswith('.txt'):
-        return file_bytes.decode('utf-8', errors='ignore')
-    return "[ERROR] 非対応形式"
+            return "[Word読み取りにはpython-docxが必要です]"
+    
+    return uploaded_file.read().decode("utf-8", errors="ignore")
+
+# =============================================================================
+# OpenAI連携
+# =============================================================================
+
+def call_openai_chat(prompt: str, api_key: str) -> str:
+    """OpenAI APIを呼び出し"""
+    if not api_key:
+        return "APIキーが設定されていません。サイドバーで設定してください。"
+    
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "あなたは日本の契約書に詳しい法務アシスタントです。"},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1500,
+            temperature=0.3,
+        )
+        return response.choices[0].message.content
+    except ImportError:
+        return "openaiライブラリがインストールされていません"
+    except Exception as e:
+        return f"エラー: {str(e)}"
+
+# =============================================================================
+# Slack通知
+# =============================================================================
+
+def send_slack_notification(webhook_url: str, message: str) -> bool:
+    """Slack通知を送信"""
+    if not webhook_url:
+        return False
+    
+    try:
+        import requests
+        response = requests.post(
+            webhook_url,
+            json={"text": message},
+            headers={"Content-Type": "application/json"},
+        )
+        return response.status_code == 200
+    except Exception:
+        return False
 
 # =============================================================================
 # レポート生成
 # =============================================================================
-def generate_report_html(clauses: List[ClauseAnalysis], contract_type: str = "一般") -> str:
-    ng_count = sum(1 for c in clauses if c.verdict == FinalVerdict.NG)
-    ok_count = sum(1 for c in clauses if c.verdict in [FinalVerdict.OK_FORMAL, FinalVerdict.OK_PATTERN])
-    improved = sum(1 for c in clauses if c.selected_rewrite)
-    
-    html = f"""<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>VERITAS v144 分析レポート</title>
-<style>
-body {{ font-family: 'Noto Sans JP', sans-serif; max-width: 900px; margin: 0 auto; padding: 2rem; }}
-.header {{ text-align: center; border-bottom: 2px solid #2d5a87; padding-bottom: 1rem; }}
-.summary {{ display: flex; justify-content: space-around; margin: 2rem 0; }}
-.summary-item {{ text-align: center; }}
-.summary-value {{ font-size: 2.5rem; font-weight: bold; }}
-.ng {{ color: #dc2626; }} .ok {{ color: #16a34a; }} .review {{ color: #d97706; }}
-.clause {{ padding: 1rem; margin: 1rem 0; border-radius: 8px; }}
-.clause-ng {{ background: #fef2f2; border-left: 4px solid #dc2626; }}
-.clause-ok {{ background: #f0fdf4; border-left: 4px solid #16a34a; }}
-.improved {{ background: #ecfdf5; border: 2px solid #16a34a; }}
-.legal {{ background: #faf5ff; padding: 0.5rem; margin: 0.5rem 0; border-radius: 4px; }}
-</style></head><body>
-<div class="header">
-<h1>⚖️ VERITAS v144 分析レポート</h1>
-<p>契約種別: {contract_type} | 生成日時: {datetime.now().strftime('%Y年%m月%d日 %H:%M')}</p>
-</div>
-<div class="summary">
-<div class="summary-item"><div class="summary-value ng">{ng_count}</div><div>問題検出</div></div>
-<div class="summary-item"><div class="summary-value ok">{ok_count}</div><div>安全</div></div>
-<div class="summary-item"><div class="summary-value" style="color:#2d5a87;">{improved}</div><div>改善済</div></div>
-</div>
-<h2>📋 条項別結果</h2>
-"""
-    
-    for i, clause in enumerate(clauses, 1):
-        if clause.verdict == FinalVerdict.NG:
-            css = "clause clause-ng"
-            if clause.selected_rewrite:
-                css += " improved"
-            html += f'<div class="{css}">'
-            html += f'<h3>【{i}】{clause.issue_type or "問題あり"}</h3>'
-            html += f'<p><strong>原文:</strong> {clause.original_text[:150]}...</p>'
-            if clause.legal_basis:
-                html += f'<div class="legal">📚 法的根拠: {clause.legal_basis}</div>'
-            if clause.selected_rewrite:
-                html += f'<p><strong>✅ 改善後:</strong> {clause.selected_rewrite[:150]}...</p>'
-            html += '</div>'
-    
-    html += f"""
-<div style="text-align:center; margin-top:2rem; color:#64748b; border-top:1px solid #e5e7eb; padding-top:1rem;">
-<p>VERITAS v144 | Patent: 2025-159636 | 「嘘なく、誇張なく、過不足なく」</p>
-</div></body></html>"""
-    return html
 
-def generate_lawyer_email(clauses: List[ClauseAnalysis]) -> str:
-    ng_clauses = [c for c in clauses if c.verdict == FinalVerdict.NG]
+def generate_csv_report(result: AnalysisResult) -> str:
+    """CSV形式のレポートを生成"""
+    lines = ["ID,カテゴリ,リスクレベル,説明,法的根拠,修正提案"]
+    for issue in result.issues:
+        line = f'"{issue.issue_id}","{issue.category}","{issue.risk_level.value}","{issue.description}","{issue.legal_basis}","{issue.fix_suggestion}"'
+        lines.append(line)
+    return "\n".join(lines)
+
+def generate_word_report(result: AnalysisResult) -> bytes:
+    """Word形式のレポートを生成"""
+    try:
+        from docx import Document
+        from docx.shared import Pt, RGBColor, Inches
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        
+        doc = Document()
+        
+        # タイトル
+        title = doc.add_heading("VERITAS 契約書分析レポート", 0)
+        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        # 概要
+        doc.add_heading("分析概要", level=1)
+        doc.add_paragraph(f"ファイル名: {result.file_name}")
+        doc.add_paragraph(f"分析日時: {result.timestamp}")
+        doc.add_paragraph(f"契約種別: {result.contract_type.value}")
+        doc.add_paragraph(f"リスクスコア: {result.risk_score:.0f}/100")
+        doc.add_paragraph(f"検出問題数: {len(result.issues)}件")
+        
+        # 問題一覧
+        doc.add_heading("検出された問題", level=1)
+        for issue in result.issues:
+            para = doc.add_paragraph()
+            run = para.add_run(f"【{issue.risk_level.value}】{issue.category}")
+            run.bold = True
+            if issue.risk_level == RiskLevel.CRITICAL:
+                run.font.color.rgb = RGBColor(255, 0, 0)
+            elif issue.risk_level == RiskLevel.HIGH:
+                run.font.color.rgb = RGBColor(255, 128, 0)
+            
+            doc.add_paragraph(f"説明: {issue.description}")
+            doc.add_paragraph(f"法的根拠: {issue.legal_basis}")
+            doc.add_paragraph(f"修正提案: {issue.fix_suggestion}")
+            doc.add_paragraph("")
+        
+        buffer = io.BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        return buffer.getvalue()
     
-    email = f"""件名: 【ご相談】契約書レビューのお願い
-
-○○法律事務所
-△△先生
-
-お世話になっております。
-下記契約書について、リスク分析を行いましたところ、{len(ng_clauses)}件の要確認事項が検出されました。
-ご多忙のところ恐縮ですが、ご確認いただけますと幸いです。
-
-■ 検出された問題点
-"""
-    
-    for i, c in enumerate(ng_clauses[:5], 1):
-        email += f"""
-{i}. {c.issue_type}
-   法的根拠: {c.legal_basis}
-   該当箇所: {c.original_text[:80]}...
-"""
-    
-    email += """
-■ ご確認いただきたい事項
-1. 上記リスクの法的評価
-2. 修正案の妥当性
-3. その他ご留意点
-
-何卒よろしくお願いいたします。
-"""
-    return email
+    except ImportError:
+        return b"python-docxライブラリが必要です"
 
 # =============================================================================
-# サンプル契約書
+# UI コンポーネント
 # =============================================================================
-SAMPLES = {
-    "危険なNDA（v144テスト）": """秘密保持契約書
 
-第1条（秘密保持義務）
-乙は、甲から開示された秘密情報を第三者に開示してはならない。
-秘密情報とは、甲が開示する一切の情報をいう。
+def render_risk_badge(risk_level: RiskLevel) -> str:
+    """リスクレベルのバッジを表示"""
+    colors = {
+        RiskLevel.CRITICAL: "🔴",
+        RiskLevel.HIGH: "🟠",
+        RiskLevel.MEDIUM: "🟡",
+        RiskLevel.LOW: "🟢",
+        RiskLevel.SAFE: "⚪",
+    }
+    return f"{colors.get(risk_level, '⚪')} {risk_level.value}"
 
-第2条（免責）
-甲は本契約に関して一切の責任を負わないものとする。
+def render_issue_card(issue: Issue):
+    """問題カードを表示"""
+    with st.expander(f"{render_risk_badge(issue.risk_level)} {issue.category} - {issue.issue_id}", expanded=issue.risk_level == RiskLevel.CRITICAL):
+        st.markdown(f"**説明:** {issue.description}")
+        st.markdown(f"**法的根拠:** {issue.legal_basis}")
+        st.markdown(f"**修正提案:** {issue.fix_suggestion}")
+        if issue.check_points:
+            st.markdown("**チェックポイント:**")
+            for cp in issue.check_points[:5]:
+                st.markdown(f"- {cp}")
+        st.code(issue.clause_text, language=None)
 
-第3条（規約変更）
-甲は通知なく本契約を変更できる。乙が異議を申し立てない場合は承諾したものとみなす。
-
-第4条（損害賠償）
-損害賠償額に上限はないものとする。
-
-第5条（解除）
-甲のみが本契約を解除できるものとする。""",
-
-    "安全なNDA": """秘密保持契約書
-
-第1条（秘密情報の定義）
-「秘密情報」とは、開示当事者が書面により秘密である旨を明示した情報をいう。
-
-第2条（秘密保持義務）
-受領当事者は、秘密情報を秘密として保持し、開示当事者の事前の書面による同意なく第三者に開示してはならない。
-
-第3条（損害賠償）
-損害賠償責任は、本契約の報酬額を上限とする。故意又は重過失の場合を除く。
-
-第4条（解除）
-甲又は乙は、相手方が本契約に違反し、30日以内に是正されない場合、書面通知により解除できる。
-
-第5条（有効期間）
-本契約の有効期間は締結日から3年間とする。秘密保持義務は契約終了後5年間存続する。""",
-
-    "業務委託契約（下請法対応）": """業務委託基本契約書
-
-第1条（委託業務）
-甲は乙に対し、別紙に定める業務を委託する。
-
-第2条（報酬）
-甲は乙に対し、別紙に定める報酬を支払う。支払は検収完了後60日以内に行う。
-
-第3条（再委託）
-乙は、甲の事前の書面による承諾なく、本業務を第三者に再委託してはならない。
-
-第4条（知的財産権）
-本業務により生じた著作権は、報酬支払完了をもって甲に移転する。
-
-第5条（秘密保持）
-甲及び乙は、本契約に関して知り得た秘密情報を第三者に開示してはならない。"""
-}
+def render_statistics():
+    """統計情報を表示"""
+    if CORE_AVAILABLE:
+        try:
+            stats = unified_pattern_engine.get_statistics()
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("総パターン数", stats.get("total_patterns", "N/A"))
+            with col2:
+                st.metric("エンジンバージョン", stats.get("engine_version", "N/A"))
+            with col3:
+                st.metric("特許対応", "6 Claims")
+        except Exception:
+            st.info("統計情報を取得できませんでした")
 
 # =============================================================================
-# メインUI
+# メイン画面
 # =============================================================================
+
 def main():
-    # セッション初期化
-    if 'engine' not in st.session_state:
-        st.session_state.engine = VeritasEngine()
-    if 'chat_engine' not in st.session_state:
-        st.session_state.chat_engine = ChatEngine(st.session_state.engine)
-    if 'clauses' not in st.session_state:
-        st.session_state.clauses = []
-    if 'chat_history' not in st.session_state:
-        st.session_state.chat_history = []
-    if 'improvements' not in st.session_state:
-        st.session_state.improvements = 0
-    
-    engine = st.session_state.engine
-    chat_engine = st.session_state.chat_engine
-    
-    # ヘッダー
-    st.markdown("""
-    <div style="text-align:center;padding:1rem 0;">
-        <h1 style="font-size:2rem;color:#1a2a3a;margin:0;">⚖️ VERITAS <span style="color:#2d5a87;">v144</span> 完全版</h1>
-        <p style="color:#64748b;font-size:0.9rem;">Patent: 2025-159636 | Part 4〜13 完全実装 | 「嘘なく、誇張なく、過不足なく」</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.title("🔍 VERITAS v162【完全版】")
+    st.caption("AI契約書レビューエンジン - Patent: 2025-159636")
     
     # サイドバー
     with st.sidebar:
-        st.markdown("### ⚙️ 設定")
-        display_mode = st.radio("表示モード", ["担当者向け", "Lawyer向け"], horizontal=True)
-        expert_mode = display_mode == "Lawyer向け"
+        st.header("⚙️ 設定")
         
-        risk_tolerance = st.select_slider(
-            "📊 リスク許容度",
-            options=["超保守的", "保守的", "標準", "積極的", "超積極的"],
-            value="標準"
+        # APIキー設定
+        st.session_state.openai_api_key = st.text_input(
+            "OpenAI API Key",
+            value=st.session_state.openai_api_key,
+            type="password",
+        )
+        
+        # Slack設定
+        st.session_state.slack_webhook_url = st.text_input(
+            "Slack Webhook URL（オプション）",
+            value=st.session_state.slack_webhook_url,
+            type="password",
+        )
+        
+        # ドメイン選択
+        st.session_state.selected_domain = st.selectbox(
+            "契約ドメイン",
+            ["auto", "nda", "outsourcing", "tos", "employment", "labor", "realestate", "it_saas", "general"],
+            format_func=lambda x: "自動検出" if x == "auto" else x.upper(),
         )
         
         st.markdown("---")
         
-        # 進捗表示
-        if st.session_state.clauses:
-            ng = sum(1 for c in st.session_state.clauses if c.verdict == FinalVerdict.NG)
-            improved = sum(1 for c in st.session_state.clauses if c.selected_rewrite)
-            st.markdown("### 📈 改善進捗")
-            if ng > 0:
-                st.progress(improved / ng)
-                st.caption(f"改善済み: {improved}/{ng}件")
-            else:
-                st.success("✅ 問題なし")
+        # エンジン情報
+        st.subheader("📊 エンジン情報")
+        st.write(f"**バージョン:** v162")
+        st.write(f"**v162コア:** {'✅' if CORE_AVAILABLE else '❌'}")
+        st.write(f"**ドメインパック:** {'✅' if DOMAINS_AVAILABLE else '❌'}")
         
-        st.markdown("---")
-        st.markdown("### 🛡️ 品質保証")
-        st.success("✅ FALSE_OK = 0")
-        st.info(f"📊 パターン: {len(FORBIDDEN_PATTERNS)+len(SAFE_PATTERNS)}")
-        
-        st.markdown("---")
-        st.markdown("### 📚 搭載DB")
-        st.caption(f"• 法令: {len(LEGAL_DB)}法律")
-        st.caption(f"• 判例: {len(PRECEDENT_DB)}件")
-        st.caption(f"• 代替案: {sum(len(v['patterns']) for v in REWRITE_PATTERNS.values())}パターン")
-        st.caption(f"• 事実DB: {len(FACT_DB)}エントリ")
+        if st.button("統計情報を表示"):
+            render_statistics()
     
     # メインタブ
-    tabs = st.tabs(["💬 対話型レビュー", "📄 一括分析", "🔍 専門パック", "📚 法令・判例", "📊 ダッシュボード"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📄 分析", "💬 チャット", "📊 比較", "📈 ダッシュボード", "📋 履歴"])
     
-    # ===== タブ1: 対話型レビュー =====
-    with tabs[0]:
-        st.markdown("### 💬 VERITASと対話しながら改善")
+    with tab1:
+        render_analysis_tab()
+    
+    with tab2:
+        render_chat_tab()
+    
+    with tab3:
+        render_comparison_tab()
+    
+    with tab4:
+        render_dashboard_tab()
+    
+    with tab5:
+        render_history_tab()
+
+def render_analysis_tab():
+    """分析タブ"""
+    st.header("📄 契約書分析")
+    
+    # ファイルアップロード
+    uploaded_file = st.file_uploader(
+        "契約書をアップロード",
+        type=["txt", "pdf", "doc", "docx"],
+        help="PDF、Word、テキストファイルに対応",
+    )
+    
+    # テキスト入力
+    contract_text = st.text_area(
+        "または直接テキストを入力",
+        height=200,
+        placeholder="契約書のテキストをここに貼り付けてください...",
+    )
+    
+    if uploaded_file:
+        contract_text = extract_text_from_file(uploaded_file)
+        st.info(f"📎 {uploaded_file.name} を読み込みました（{len(contract_text):,}文字）")
+    
+    # 分析実行
+    if st.button("🔍 分析を実行", type="primary", disabled=not contract_text):
+        with st.spinner("分析中..."):
+            engine = VeritasEngine()
+            result = engine.analyze(
+                contract_text,
+                file_name=uploaded_file.name if uploaded_file else "direct_input.txt",
+                domain=st.session_state.selected_domain,
+            )
+            st.session_state.current_analysis = result
+            
+            # 履歴に追加
+            st.session_state.analysis_history.append({
+                "timestamp": result.timestamp,
+                "file_name": result.file_name,
+                "risk_score": result.risk_score,
+                "issue_count": len(result.issues),
+                "contract_type": result.contract_type.value,
+            })
         
-        # チャット履歴
-        chat_container = st.container()
-        with chat_container:
-            if not st.session_state.chat_history:
-                st.markdown(f'<div class="chat-veritas">{chat_engine.TEMPLATES["greeting"]}</div>', unsafe_allow_html=True)
-            for msg in st.session_state.chat_history[-10:]:
-                css = "chat-user" if msg["role"] == "user" else "chat-veritas"
-                st.markdown(f'<div class="{css}">{msg["content"]}</div>', unsafe_allow_html=True)
+        # 結果表示
+        st.success("✅ 分析完了")
         
-        # 入力
-        col1, col2 = st.columns([5, 1])
-        with col1:
-            user_input = st.text_input("メッセージ", key="chat_input", label_visibility="collapsed", placeholder="条項を入力または質問...")
-        with col2:
-            if st.button("送信", type="primary"):
-                if user_input:
-                    st.session_state.chat_history.append({"role": "user", "content": user_input})
-                    response = chat_engine.respond(user_input, st.session_state)
-                    st.session_state.chat_history.append({"role": "veritas", "content": response})
-                    st.rerun()
-        
-        # クイックアクション
-        st.markdown("---")
+        # サマリー
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            if st.button("❓ ヘルプ"):
-                st.session_state.chat_history.append({"role": "veritas", "content": chat_engine.TEMPLATES["greeting"]})
-                st.rerun()
+            color = "🔴" if result.risk_score >= 70 else "🟠" if result.risk_score >= 40 else "🟢"
+            st.metric("リスクスコア", f"{color} {result.risk_score:.0f}/100")
         with col2:
-            if st.button("📋 サンプル分析"):
-                sample = SAMPLES["危険なNDA（v144テスト）"]
-                clauses = engine.split_clauses(sample)
-                st.session_state.clauses = [engine.analyze_clause(c, f"clause_{i}") for i, c in enumerate(clauses)]
-                ng = sum(1 for c in st.session_state.clauses if c.verdict == FinalVerdict.NG)
-                review = sum(1 for c in st.session_state.clauses if c.verdict == FinalVerdict.REVIEW)
-                st.session_state.chat_history.append({"role": "veritas", "content": chat_engine.TEMPLATES["analysis_done"].format(ng=ng, review=review)})
-                st.rerun()
+            st.metric("検出問題数", len(result.issues))
         with col3:
-            if st.button("📥 レポート"):
-                if st.session_state.clauses:
-                    html = generate_report_html(st.session_state.clauses)
-                    st.download_button("HTMLダウンロード", html, f"veritas_report_{datetime.now().strftime('%Y%m%d')}.html", "text/html")
+            st.metric("契約種別", result.contract_type.value)
         with col4:
-            if st.button("🔄 リセット"):
-                st.session_state.clauses = []
-                st.session_state.chat_history = []
-                st.rerun()
+            st.metric("エンジン", f"v{result.engine_version}")
+        
+        # 問題一覧
+        st.markdown("### 🚨 検出された問題")
+        
+        # リスクレベルでソート
+        sorted_issues = sorted(
+            result.issues,
+            key=lambda x: [RiskLevel.CRITICAL, RiskLevel.HIGH, RiskLevel.MEDIUM, RiskLevel.LOW, RiskLevel.SAFE].index(x.risk_level),
+        )
+        
+        for issue in sorted_issues:
+            render_issue_card(issue)
+        
+        # ToDo一覧
+        if result.compressed_todos:
+            st.markdown("### ✅ ToDo リスト（圧縮済み）")
+            for group in result.compressed_todos:
+                with st.expander(f"📁 {group['group']}（{len(group['items'])}件）"):
+                    for item in group['items']:
+                        st.checkbox(item.get('action', str(item)), key=f"todo_{item.get('id', '')}")
+        
+        # リライト提案
+        if result.rewrite_suggestions:
+            st.markdown("### ✏️ 修正提案")
+            for i, suggestion in enumerate(result.rewrite_suggestions[:5]):
+                with st.expander(f"提案 {i+1}"):
+                    st.markdown("**原文:**")
+                    st.code(suggestion['original'])
+                    st.markdown("**修正案:**")
+                    st.code(suggestion['suggested'])
+                    st.markdown(f"**理由:** {suggestion['reason']}")
+        
+        # エクスポート
+        st.markdown("### 📥 レポート出力")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            csv_data = generate_csv_report(result)
+            st.download_button(
+                "📊 CSVダウンロード",
+                csv_data,
+                file_name=f"veritas_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+            )
+        
+        with col2:
+            word_data = generate_word_report(result)
+            st.download_button(
+                "📝 Wordダウンロード",
+                word_data,
+                file_name=f"veritas_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        
+        # Slack通知
+        if st.session_state.slack_webhook_url and result.risk_score >= 50:
+            message = f"🚨 VERITAS Alert: {result.file_name}\nリスクスコア: {result.risk_score:.0f}/100\n問題数: {len(result.issues)}件"
+            if send_slack_notification(st.session_state.slack_webhook_url, message):
+                st.success("📢 Slack通知を送信しました")
+
+def render_chat_tab():
+    """チャットタブ"""
+    st.header("💬 契約書アシスタント")
     
-    # ===== タブ2: 一括分析 =====
-    with tabs[1]:
-        st.markdown("### 📄 契約書を一括分析")
-        
-        input_method = st.radio("入力方法", ["📁 ファイル", "📝 テキスト", "📋 サンプル"], horizontal=True)
-        
-        contract_text = ""
-        if input_method == "📁 ファイル":
-            uploaded = st.file_uploader("Word/PDF/テキスト", type=["docx", "pdf", "txt"])
-            if uploaded:
-                contract_text = extract_text(uploaded)
-        elif input_method == "📝 テキスト":
-            contract_text = st.text_area("契約書テキスト", height=200)
-        else:
-            sample_name = st.selectbox("サンプル選択", list(SAMPLES.keys()))
-            contract_text = st.text_area("契約書テキスト", value=SAMPLES[sample_name], height=200)
-        
-        if st.button("🔍 分析実行", type="primary", use_container_width=True):
-            if contract_text and not contract_text.startswith("[ERROR]"):
-                with st.spinner("分析中..."):
-                    clauses = engine.split_clauses(contract_text)
-                    st.session_state.clauses = [engine.analyze_clause(c, f"clause_{i}") for i, c in enumerate(clauses)]
-                
-                # 結果表示
-                st.markdown("---")
-                ng = sum(1 for c in st.session_state.clauses if c.verdict == FinalVerdict.NG)
-                ok = sum(1 for c in st.session_state.clauses if c.verdict in [FinalVerdict.OK_FORMAL, FinalVerdict.OK_PATTERN])
-                rev = sum(1 for c in st.session_state.clauses if c.verdict == FinalVerdict.REVIEW)
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.markdown(f'<div class="metric-card"><div class="metric-value" style="color:#dc2626;">{ng}</div><div class="metric-label">🚫 NG</div></div>', unsafe_allow_html=True)
-                with col2:
-                    st.markdown(f'<div class="metric-card"><div class="metric-value" style="color:#16a34a;">{ok}</div><div class="metric-label">✅ OK</div></div>', unsafe_allow_html=True)
-                with col3:
-                    st.markdown(f'<div class="metric-card"><div class="metric-value" style="color:#d97706;">{rev}</div><div class="metric-label">⚠️ REVIEW</div></div>', unsafe_allow_html=True)
-                
-                # 条項別結果
-                st.markdown("### 📋 条項別結果")
-                for i, clause in enumerate(st.session_state.clauses):
-                    verdict_map = {
-                        FinalVerdict.NG: ("verdict-ng", "🚫"),
-                        FinalVerdict.OK_FORMAL: ("verdict-ok", "✅"),
-                        FinalVerdict.OK_PATTERN: ("verdict-ok", "✅"),
-                        FinalVerdict.REVIEW: ("verdict-review", "⚠️"),
-                    }
-                    css, icon = verdict_map.get(clause.verdict, ("", ""))
-                    
-                    with st.expander(f"{icon} 条項{i+1}: {clause.issue_type or clause.verdict.value}", expanded=(clause.verdict == FinalVerdict.NG)):
-                        st.markdown(f'<div class="{css}">{clause.original_text[:300]}...</div>', unsafe_allow_html=True)
-                        
-                        if clause.verdict == FinalVerdict.NG:
-                            if clause.legal_basis:
-                                st.markdown(f"**📚 法的根拠:** {clause.legal_basis}")
-                            
-                            if expert_mode:
-                                if clause.related_laws:
-                                    st.markdown("**📖 関連法令:**")
-                                    for law in clause.related_laws:
-                                        st.markdown(f'<div class="legal-card"><strong>{law["law"]} {law["provision"]}</strong>: {law["content"]}</div>', unsafe_allow_html=True)
-                                
-                                if clause.related_precedents:
-                                    st.markdown("**⚖️ 関連判例:**")
-                                    for prec in clause.related_precedents:
-                                        st.markdown(f'<div class="precedent-card"><strong>{prec["case"]}</strong>（{prec["court"]}・{prec["year"]}年）: {prec["summary"][:80]}...</div>', unsafe_allow_html=True)
-                            
-                            if clause.rewrite_options:
-                                st.markdown("**✏️ 代替案:**")
-                                for j, opt in enumerate(clause.rewrite_options[:3], 1):
-                                    col1, col2 = st.columns([5, 1])
-                                    with col1:
-                                        st.markdown(f'<div class="rewrite-card"><strong>案{j}:</strong> {opt[:120]}...</div>', unsafe_allow_html=True)
-                                    with col2:
-                                        if st.button(f"採用", key=f"adopt_{i}_{j}"):
-                                            clause.selected_rewrite = opt
-                                            st.success("✅ 採用")
+    if not st.session_state.openai_api_key:
+        st.warning("チャット機能を使用するには、サイドバーでOpenAI APIキーを設定してください。")
+        return
     
-    # ===== タブ3: 専門パック =====
-    with tabs[2]:
-        st.markdown("### 🔍 専門パックチェック")
-        
-        pack_type = st.selectbox("チェックパック", ["NDA専用パック（Part 8）", "業務委託専用パック（Part 9）", "利用規約専用パック（Part 12）"])
-        
-        pack_text = st.text_area("契約書テキスト", height=200, key="pack_text")
-        
-        if st.button("🔍 専門チェック実行", type="primary"):
-            if pack_text:
-                if "NDA" in pack_type:
-                    checklist = NDA_CHECKLIST
-                elif "業務委託" in pack_type:
-                    checklist = OUTSOURCING_CHECKLIST
-                else:
-                    checklist = TOS_CHECKLIST
-                
-                result = engine.check_specialist(pack_text, checklist)
-                
-                # グレード表示
-                grade_colors = {"A": "#16a34a", "B": "#2d5a87", "C": "#d97706", "D": "#dc2626"}
-                st.markdown(f"""
-                <div style="text-align:center;padding:2rem;background:linear-gradient(135deg,#f8fafc,#f1f5f9);border-radius:16px;margin:1rem 0;">
-                    <div style="font-size:4rem;font-weight:bold;color:{grade_colors[result['grade']]};">{result['grade']}</div>
-                    <div style="font-size:1.2rem;color:#64748b;">スコア: {result['score']}/{result['max_score']}点</div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # チェックリスト結果
-                st.markdown("### 📋 チェック項目")
-                for item in result["results"]:
-                    icon = "✅" if item["found"] else "❌"
-                    required = "【必須】" if item.get("required") else ""
-                    st.markdown(f"{icon} {required}{item['item']} (配点: {item['weight']})")
+    # チャット履歴を表示
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg.role):
+            st.write(msg.content)
     
-    # ===== タブ4: 法令・判例 =====
-    with tabs[3]:
-        st.markdown("### 📚 法令・判例データベース")
-        
-        sub1, sub2 = st.tabs(["📖 法令DB", "⚖️ 判例DB"])
-        
-        with sub1:
-            law_name = st.selectbox("法律を選択", list(LEGAL_DB.keys()))
-            for prov_id, prov in LEGAL_DB[law_name].items():
-                st.markdown(f'<div class="legal-card"><strong>{prov_id}</strong> {prov["title"]}<br/>{prov["content"]}</div>', unsafe_allow_html=True)
-        
-        with sub2:
-            keyword = st.text_input("キーワード検索", placeholder="例: 競業避止、解雇")
-            results = [p for p in PRECEDENT_DB if not keyword or keyword in " ".join(p["keywords"]) or keyword in p["summary"]]
-            for prec in results:
-                st.markdown(f'<div class="precedent-card"><strong>{prec["case"]}</strong>（{prec["court"]}・{prec["year"]}年）<br/>{prec["summary"]}</div>', unsafe_allow_html=True)
+    # ユーザー入力
+    user_input = st.chat_input("契約書について質問してください...")
     
-    # ===== タブ5: ダッシュボード =====
-    with tabs[4]:
-        st.markdown("### 📊 統計ダッシュボード")
+    if user_input:
+        # ユーザーメッセージを追加
+        st.session_state.chat_history.append(ChatMessage(role="user", content=user_input))
         
-        if st.session_state.clauses:
-            ng = sum(1 for c in st.session_state.clauses if c.verdict == FinalVerdict.NG)
-            ok = sum(1 for c in st.session_state.clauses if c.verdict in [FinalVerdict.OK_FORMAL, FinalVerdict.OK_PATTERN])
-            rev = sum(1 for c in st.session_state.clauses if c.verdict == FinalVerdict.REVIEW)
-            improved = sum(1 for c in st.session_state.clauses if c.selected_rewrite)
+        # コンテキストを構築
+        context = ""
+        if st.session_state.current_analysis:
+            result = st.session_state.current_analysis
+            context = f"""
+現在分析中の契約書情報:
+- ファイル名: {result.file_name}
+- 契約種別: {result.contract_type.value}
+- リスクスコア: {result.risk_score:.0f}/100
+- 検出問題数: {len(result.issues)}件
+
+主な問題:
+"""
+            for issue in result.issues[:5]:
+                context += f"- [{issue.risk_level.value}] {issue.category}: {issue.description}\n"
+        
+        prompt = f"""
+{context}
+
+ユーザーの質問: {user_input}
+
+日本の契約書法務の専門家として、上記の質問に回答してください。
+"""
+        
+        # AI応答を取得
+        with st.spinner("回答を生成中..."):
+            response = call_openai_chat(prompt, st.session_state.openai_api_key)
+        
+        # AI応答を追加
+        st.session_state.chat_history.append(ChatMessage(role="assistant", content=response))
+        
+        st.rerun()
+
+def render_comparison_tab():
+    """比較分析タブ"""
+    st.header("📊 契約書比較分析")
+    st.info("2つの契約書を比較して、リスクの違いを分析します。")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**契約書1**")
+        contract1 = st.text_area("契約書1のテキスト", height=200, key="compare_contract1")
+    
+    with col2:
+        st.markdown("**契約書2**")
+        contract2 = st.text_area("契約書2のテキスト", height=200, key="compare_contract2")
+    
+    if st.button("🔍 比較分析を実行", type="primary"):
+        if contract1.strip() and contract2.strip():
+            with st.spinner("比較分析中..."):
+                engine = VeritasEngine()
+                result1 = engine.analyze(contract1, file_name="契約書1")
+                result2 = engine.analyze(contract2, file_name="契約書2")
             
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("総条項数", len(st.session_state.clauses))
-            with col2:
-                st.metric("問題検出", ng, delta=f"-{improved}" if improved else None)
-            with col3:
-                st.metric("改善済み", improved)
-            with col4:
-                rate = (improved / ng * 100) if ng > 0 else 100
-                st.metric("改善率", f"{rate:.0f}%")
-            
-            # 問題タイプ別
-            st.markdown("#### 問題タイプ別集計")
-            issue_types = {}
-            for c in st.session_state.clauses:
-                if c.verdict == FinalVerdict.NG and c.issue_type:
-                    issue_types[c.issue_type] = issue_types.get(c.issue_type, 0) + 1
-            
-            if issue_types:
-                for issue, count in sorted(issue_types.items(), key=lambda x: -x[1]):
-                    st.markdown(f"• **{issue}**: {count}件")
-            
-            # レポート出力
             st.markdown("---")
-            st.markdown("#### 📥 レポート出力")
-            col1, col2 = st.columns(2)
+            st.markdown("### 📈 比較結果")
+            
+            col1, col2, col3 = st.columns(3)
             with col1:
-                html = generate_report_html(st.session_state.clauses)
-                st.download_button("📄 HTMLレポート", html, f"veritas_report_{datetime.now().strftime('%Y%m%d')}.html", "text/html", use_container_width=True)
+                st.metric("契約書1 リスクスコア", f"{result1.risk_score:.0f}点")
             with col2:
-                email = generate_lawyer_email(st.session_state.clauses)
-                st.download_button("📧 弁護士メール案", email, f"lawyer_email_{datetime.now().strftime('%Y%m%d')}.txt", "text/plain", use_container_width=True)
+                st.metric("契約書2 リスクスコア", f"{result2.risk_score:.0f}点")
+            with col3:
+                diff = result1.risk_score - result2.risk_score
+                st.metric("スコア差", f"{diff:+.0f}点")
+            
+            # 問題数比較
+            st.markdown("#### 問題数比較")
+            data = {
+                "項目": ["CRITICAL", "HIGH", "MEDIUM", "LOW"],
+                "契約書1": [
+                    sum(1 for i in result1.issues if i.risk_level == RiskLevel.CRITICAL),
+                    sum(1 for i in result1.issues if i.risk_level == RiskLevel.HIGH),
+                    sum(1 for i in result1.issues if i.risk_level == RiskLevel.MEDIUM),
+                    sum(1 for i in result1.issues if i.risk_level == RiskLevel.LOW),
+                ],
+                "契約書2": [
+                    sum(1 for i in result2.issues if i.risk_level == RiskLevel.CRITICAL),
+                    sum(1 for i in result2.issues if i.risk_level == RiskLevel.HIGH),
+                    sum(1 for i in result2.issues if i.risk_level == RiskLevel.MEDIUM),
+                    sum(1 for i in result2.issues if i.risk_level == RiskLevel.LOW),
+                ],
+            }
+            st.dataframe(data)
         else:
-            st.info("契約書を分析すると、統計情報がここに表示されます。")
+            st.error("両方の契約書テキストを入力してください。")
+
+def render_dashboard_tab():
+    """ダッシュボードタブ"""
+    st.header("📈 分析ダッシュボード")
     
-    # フッター
-    st.markdown(f"""
-    <div style="text-align:center;padding:2rem;color:#64748b;font-size:0.85rem;border-top:1px solid #e5e7eb;margin-top:2rem;">
-        <p><strong>VERITAS v144 完全版</strong> | Patent: 2025-159636</p>
-        <p>Part 4〜13 完全実装 | 法令: {len(LEGAL_DB)} | 判例: {len(PRECEDENT_DB)} | 代替案: {sum(len(v['patterns']) for v in REWRITE_PATTERNS.values())}</p>
-        <p style="color:#94a3b8;">「嘘なく、誇張なく、過不足なく」</p>
-    </div>
-    """, unsafe_allow_html=True)
+    history = st.session_state.analysis_history
+    
+    if not history:
+        st.info("まだ分析履歴がありません。「分析」タブで契約書を分析してください。")
+        return
+    
+    # 概要メトリクス
+    total = len(history)
+    scores = [h.get("risk_score", 0) for h in history]
+    avg_score = sum(scores) / total if total > 0 else 0
+    high_risk = sum(1 for s in scores if s >= 50)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("総分析数", total)
+    with col2:
+        st.metric("平均リスクスコア", f"{avg_score:.1f}点")
+    with col3:
+        st.metric("高リスク件数", high_risk)
+    with col4:
+        rate = (high_risk / total * 100) if total > 0 else 0
+        st.metric("高リスク率", f"{rate:.1f}%")
+    
+    # トレンドグラフ
+    if len(scores) > 1:
+        st.markdown("### 📈 リスクスコア推移")
+        st.line_chart(scores)
+    
+    # 契約タイプ分布
+    st.markdown("### 📊 契約タイプ分布")
+    type_counts = defaultdict(int)
+    for h in history:
+        type_counts[h.get("contract_type", "unknown")] += 1
+    
+    for contract_type, count in type_counts.items():
+        st.progress(count / max(total, 1), text=f"{contract_type}: {count}件")
+
+def render_history_tab():
+    """履歴タブ"""
+    st.header("📋 分析履歴")
+    
+    history = st.session_state.analysis_history
+    
+    if not history:
+        st.info("まだ分析履歴がありません。")
+        return
+    
+    # 履歴テーブル
+    for i, h in enumerate(reversed(history)):
+        col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+        with col1:
+            st.write(h.get("file_name", "unknown"))
+        with col2:
+            st.write(h.get("timestamp", "")[:19])
+        with col3:
+            score = h.get("risk_score", 0)
+            color = "🔴" if score >= 70 else "🟠" if score >= 40 else "🟢"
+            st.write(f"{color} {score:.0f}")
+        with col4:
+            st.write(f"{h.get('issue_count', 0)}件")
+    
+    if st.button("🗑️ 履歴をクリア"):
+        st.session_state.analysis_history = []
+        st.rerun()
+
+# =============================================================================
+# エントリーポイント
+# =============================================================================
 
 if __name__ == "__main__":
     main()
